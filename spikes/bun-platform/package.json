@@ -1,0 +1,18 @@
+{
+  "name": "pikpak-bun-platform-spike",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "probe": "bun probe.ts",
+    "compile": "bun build probe.ts --compile --define=PROBE_COMPILED=true --outfile=dist/platform-probe",
+    "build:native": "bun build-native.ts",
+    "probe:native": "bun native-probe.ts",
+    "compile:native": "bun build native-probe.ts --compile --define=PROBE_COMPILED=true --outfile=dist/native-probe"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "typescript": "7.0.2"
+  }
+}
