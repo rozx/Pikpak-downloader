@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import type { Theme, Tone } from "./theme";
 import type { TuiSnapshot } from "./controller";
 import { formatBytes, formatDuration, formatSpeed, truncateMiddle } from "./format";
-import type { Location, Row, ShareCounts } from "./view-model";
+import type { ListRow, Row, ShareCounts } from "./view-model";
 import { Banners, Bar, Header, Keys, Rule, SPINNER, bannerLines, boxHighlight, creditLabel, textHighlight, useSpinner } from "./parts";
 
 export type Size = { columns: number; rows: number };
@@ -14,10 +14,10 @@ export function panelLayout(size: Size, snapshot: TuiSnapshot, overlayLines = 0)
   const eventLines = Math.min(EVENT_LINES, snapshot.events.length || 1);
   return { listHeight: Math.max(1, size.rows - 1 - bannerLines(snapshot) - 3 - eventLines - 1 - overlayLines), eventLines };
 }
-// 名称之外：选中标记、图标、大小、状态与行尾的位置图标合计约 79 列。
-const nameWidthFor = (columns: number) => Math.max(18, Math.min(48, columns - 79));
-// 位置图标（add-task-controls 决策 6）：本地文件在显示 💻，云盘中有副本显示 ☁️；没有的位置留空，两格位置固定，上下对齐。
-export const LOCAL_ICON = "💻", CLOUD_ICON = "☁️";
+// 名称之外：选中标记、图标、大小与状态（含云端标记）合计约 74 列。
+const nameWidthFor = (columns: number) => Math.max(18, Math.min(48, columns - 74));
+// 云端标记（add-task-controls 决策 6）：单宽文本符号（不带 emoji 变体选择符），淡蓝色，跟在状态后面。
+export const CLOUD_MARK = "\u2601";
 
 // 选中行的全部文字都改用选中调色板，保证在选中背景上可读。
 function CountsText({ counts, theme, scanning, cancelled, paused, selected, frame }: { counts: ShareCounts; theme: Theme; scanning: boolean; cancelled: boolean; paused: boolean; selected: boolean; frame: number | null }) {
@@ -32,12 +32,9 @@ function CountsText({ counts, theme, scanning, cancelled, paused, selected, fram
       {part(counts.missing, "本地缺失", "warning")}
       {cancelled && <Text {...paint("muted")}> · 分享已取消</Text>}
       {paused && !cancelled && <Text {...paint("warning")}> · 已暂停</Text>}
+      {counts.cloud > 0 && <Text {...paint("cloud")}> {CLOUD_MARK}</Text>}
     </Text>
   );
-}
-
-function LocationIcons({ location, theme, selected }: { location: Location; theme: Theme; selected: boolean }) {
-  return <Text {...theme.paint("text", selected)}>{location.local === "full" ? LOCAL_ICON : "  "} {location.cloud ? CLOUD_ICON : "  "}</Text>;
 }
 
 function FileStatus({ row, snapshot, theme, selected }: { row: Extract<Row, { kind: "file" }>; snapshot: TuiSnapshot; theme: Theme; selected: boolean }) {
@@ -45,8 +42,9 @@ function FileStatus({ row, snapshot, theme, selected }: { row: Extract<Row, { ki
   const progress = snapshot.progress[row.file.id];
   const bytes = progress?.bytes ?? row.file.checkpoint, size = row.file.size;
   const percent = size > 0n ? Number(bytes * 100n / size) : 100;
+  const cloud = row.location.cloud ? <Text {...paint("cloud")}> {CLOUD_MARK}</Text> : null;
   if (row.look.label === "已暂停") {
-    return <Text><Bar percent={percent} theme={theme} tone="warning" selected={selected} /><Text {...paint("text")}>  {percent}%</Text><Text {...paint("warning")}>  已暂停</Text></Text>;
+    return <Text><Bar percent={percent} theme={theme} tone="warning" selected={selected} /><Text {...paint("text")}>  {percent}%</Text><Text {...paint("warning")}>  已暂停</Text>{cloud}</Text>;
   }
   if (row.file.state === "downloading" && !row.file.cancelled) {
     return (
@@ -54,18 +52,25 @@ function FileStatus({ row, snapshot, theme, selected }: { row: Extract<Row, { ki
         <Bar percent={percent} theme={theme} selected={selected} /><Text {...paint("strong")}>  {percent}%</Text>
         <Text {...paint("text")}>  {formatBytes(bytes)}/{formatBytes(size)}</Text>
         {progress?.rate != null && <Text {...paint("active")}>  {formatSpeed(progress.rate)}</Text>}
-        {progress?.eta != null && <Text {...paint("muted")}>  {formatDuration(progress.eta)}</Text>}
+        {progress?.eta != null && <Text {...paint("muted")}>  {formatDuration(progress.eta)}</Text>}{cloud}
       </Text>
     );
   }
-  return <Text {...paint(row.look.tone)} wrap="truncate-end">{row.look.label}</Text>;
+  return <Text wrap="truncate-end"><Text {...paint(row.look.tone)}>{row.look.label}</Text>{cloud}</Text>;
 }
 
 // frame 不为 null 时，正在执行的文件与扫描中的分享显示动态图标。
-export function RowLine({ row, selected, snapshot, theme, columns, frame = null }: { row: Row; selected: boolean; snapshot: TuiSnapshot; theme: Theme; columns: number; frame?: number | null }) {
+export function RowLine({ row, selected, snapshot, theme, columns, frame = null }: { row: ListRow; selected: boolean; snapshot: TuiSnapshot; theme: Theme; columns: number; frame?: number | null }) {
+  if (row.kind === "group") {
+    // 分组行：本地下载目录与其中的分享数；路径过长时从中间省略。
+    return (
+      <Text wrap="truncate-end">
+        <Text {...theme.paint("muted")}>下载到 </Text><Text {...theme.paint("strong")} bold>{truncateMiddle(row.path, Math.max(10, columns - 24))}</Text>
+        <Text {...theme.paint("muted")}>  · {row.shares} 个分享</Text>
+      </Text>
+    );
+  }
   if (row.kind === "share") {
-    // 目录列让位给计数与云端图标，最多占四分之一宽度。
-    const path = truncateMiddle(row.share.outputRoot, Math.max(10, Math.floor(columns / 4)));
     return (
       <Box {...boxHighlight(theme.selection, selected)}>
         <Box flexShrink={1}>
@@ -75,10 +80,7 @@ export function RowLine({ row, selected, snapshot, theme, columns, frame = null 
             <CountsText counts={row.counts} theme={theme} scanning={row.share.scanStatus !== "complete"} cancelled={row.share.cancelled} paused={row.share.paused} selected={selected} frame={frame} />
           </Text>
         </Box>
-        <Box flexGrow={1} justifyContent="flex-end" flexShrink={0} marginLeft={2}>
-          {row.counts.cloud > 0 && <Text {...theme.paint("text", selected)}>{CLOUD_ICON} {row.counts.cloud}  </Text>}
-          <Text {...theme.paint("muted", selected)}>{path}</Text>
-        </Box>
+        <Box flexGrow={1} />
       </Box>
     );
   }
@@ -90,14 +92,13 @@ export function RowLine({ row, selected, snapshot, theme, columns, frame = null 
       <Box width={nameWidth} marginRight={1}><Text {...theme.paint("text", selected)} bold={selected} {...textHighlight(theme.selection, selected)}>{truncateMiddle(row.name, nameWidth)}</Text></Box>
       <Box width={8} marginRight={1}><Text {...theme.paint("muted", selected)}>{formatBytes(row.file.size)}</Text></Box>
       <Box flexShrink={1} flexGrow={1}><FileStatus row={row} snapshot={snapshot} theme={theme} selected={selected} /></Box>
-      <Box flexShrink={0} marginLeft={2}><LocationIcons location={row.location} theme={theme} selected={selected} /></Box>
     </Box>
   );
 }
 
 const clock = (at: number) => new Date(at).toLocaleTimeString("zh-CN", { hour12: false });
 export function MainPanel({ snapshot, rows, selected, offset, size, theme, overlay, overlayLines = 0, keys }: {
-  snapshot: TuiSnapshot; rows: Row[]; selected: number; offset: number; size: Size; theme: Theme;
+  snapshot: TuiSnapshot; rows: ListRow[]; selected: number; offset: number; size: Size; theme: Theme;
   overlay?: ReactNode; overlayLines?: number; keys: Array<[string, string]>;
 }) {
   const { listHeight, eventLines } = panelLayout(size, snapshot, overlayLines);
@@ -105,7 +106,7 @@ export function MainPanel({ snapshot, rows, selected, offset, size, theme, overl
   const events = snapshot.events.slice(-eventLines);
   // 暂停、停止中或系统暂停时执行器不在工作，图标保持静止。
   const frame = useSpinner(!snapshot.stopping && !snapshot.userPaused && !snapshot.systemPause
-    && rows.some(row => row.kind === "file" ? !!row.look.active : row.share.scanStatus !== "complete" && row.counts.total === 0));
+    && rows.some(row => row.kind === "file" ? !!row.look.active : row.kind === "share" && row.share.scanStatus !== "complete" && row.counts.total === 0));
   return (
     <Box flexDirection="column" height={size.rows} paddingX={1}>
       <Header snapshot={snapshot} theme={theme} width={width} />

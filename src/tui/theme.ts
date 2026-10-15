@@ -1,14 +1,14 @@
-export type Tone = "done" | "active" | "transfer" | "scan" | "warning" | "error" | "muted" | "text" | "strong" | "key";
+export type Tone = "done" | "active" | "transfer" | "scan" | "warning" | "error" | "muted" | "text" | "strong" | "key" | "cloud";
 // 只用标准 16 色，Windows Terminal、传统控制台与 macOS 终端都按各自主题显示。
 const palette: Record<Tone, string> = {
   done: "green", active: "cyan", transfer: "blue", scan: "magenta", warning: "yellow", error: "red",
-  muted: "gray", text: "white", strong: "whiteBright", key: "yellowBright",
+  muted: "gray", text: "white", strong: "whiteBright", key: "yellowBright", cloud: "blueBright",
 };
 // 选中行用浅色底、黑色文字：各终端主题的蓝色亮度差异很大，蓝底配亮色文字在部分主题中看不清。
 // 浅色底上只有黑色与蓝色在常见主题中都足够清楚；下载与转存的进度条和动态图标保留蓝色。
 const onSelection: Record<Tone, string> = {
   done: "black", active: "blue", transfer: "blue", scan: "black", warning: "black", error: "black",
-  muted: "black", text: "black", strong: "black", key: "black",
+  muted: "black", text: "black", strong: "black", key: "black", cloud: "blue",
 };
 export const SELECTION_BACKGROUND = "white";
 export type Highlight = { backgroundColor: string; color?: string } | { inverse: true };

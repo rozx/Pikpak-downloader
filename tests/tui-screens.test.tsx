@@ -364,24 +364,21 @@ test("x 在云盘中已没有副本的已完成任务上只删除记录；已完
   expect(frame()).toContain("已完成的删除任务记录"); expect(frame()).toContain("继续时从分享重新转存");
 });
 
-test("位置图标在行尾：💻 本地文件在、☁️ 云盘有副本，上下对齐；本地文件已不在时写明；分享行显示 ☁️ 数量；记录删除后行消失，详情页回到主面板", async () => {
+test("云端标记 ☁ 跟在状态后；本地文件已不在时写明；分享行有文件在云端时加 ☁；记录删除后行消失，详情页回到主面板", async () => {
   const controller = new FakeController();
   const { frame, press } = mount(controller); await settle();
   const line = (name: string) => frame().split("\n").find(item => item.includes(name)) ?? "";
-  // 行尾两格固定：本地格在前、云端格在后，没有的位置留空。
-  expect(line("episode01.mkv")).toMatch(/已完成\s+💻$/);
-  expect(line("episode02.mkv")).toMatch(/1分19秒\s+☁️$/);
-  expect(line("episode03.mkv")).not.toMatch(/💻|☁️/);
-  // 图标列上下对齐：本地图标与云端图标各在固定的显示列。
-  const column = (name: string, icon: string) => displayWidth(line(name).slice(0, line(name).indexOf(icon)));
-  expect(column("episode02.mkv", "☁️")).toBe(column("第一季", "☁️")); expect(column("episode02.mkv", "☁️")).toBe(column("episode01.mkv", "💻") + 3);
-  expect(line("「某某合集」")).toMatch(/☁️ 1\s+C:\\/); expect(line("「某某合集」")).not.toContain("在云端");
+  expect(line("episode01.mkv")).toMatch(/已完成$/);
+  expect(line("episode02.mkv")).toMatch(/1分19秒 ☁$/);
+  expect(line("第一季")).toMatch(/仍被拒绝 ☁$/);
+  expect(line("episode03.mkv")).not.toContain("☁");
+  expect(line("「某某合集」")).toMatch(/1 排队 ☁$/); expect(line("「另一个分享」")).not.toContain("☁");
   const files = mockSnapshot().files;
   files.s_1 = files.s_1!.map(item => item.id === "f_1" ? { ...item, copyState: "retained" as const } : item);
   controller.update({ files }); await settle();
-  expect(line("episode01.mkv")).toMatch(/💻 ☁️$/); expect(line("「某某合集」")).toContain("☁️ 2");
+  expect(line("episode01.mkv")).toMatch(/已完成 ☁$/);
   controller.update({ localMissing: new Set(["f_1"]) }); await settle();
-  expect(line("episode01.mkv")).toContain("已完成 · 本地文件已不在"); expect(line("episode01.mkv")).not.toContain("💻");
+  expect(line("episode01.mkv")).toContain("已完成 · 本地文件已不在 ☁");
   expect(line("「某某合集」")).toContain("· 1 本地缺失");
   await press(keys.enter);
   expect(frame()).toContain("本地文件"); expect(frame()).toContain("已不存在 · 被移动或删除");
@@ -389,4 +386,24 @@ test("位置图标在行尾：💻 本地文件在、☁️ 云盘有副本，�
   controller.update({ files: { ...files, s_1: files.s_1!.filter(item => item.id !== "f_1") } }); await settle();
   expect(frame()).not.toContain("文件详情"); expect(frame()).toContain("q 退出");
   expect(frame().split("\n").filter(item => item.includes("episode01.mkv") && !item.includes("校验通过"))).toEqual([]);
+});
+
+test("按本地下载目录分组：目录只在分组行显示一次；分组行不可选中，上下移动跳过它", async () => {
+  const snapshot = mockSnapshot();
+  snapshot.shares = snapshot.shares.map(item => item.id === "s_2" ? { ...item, outputRoot: "D:\\Other" } : item);
+  const controller = new FakeController(snapshot);
+  const { frame, press } = mount(controller); await settle();
+  const lines = frame().split("\n");
+  expect(lines.filter(item => item.includes("PikPak-Test"))).toEqual([" 下载到 C:\\Users\\demo\\Downloads\\PikPak-Test  · 2 个分享"]);
+  expect(lines.filter(item => item.includes("D:\\Other"))).toEqual([" 下载到 D:\\Other  · 1 个分享"]);
+  const order = lines.filter(item => !/\d\d:\d\d:\d\d/.test(item)).map(item => item.includes("下载到 C:") ? "G1" : item.includes("下载到 D:") ? "G2" : item.includes("「某某合集」") ? "S1"
+    : item.includes("「另一个分享」") ? "S3" : item.includes("「纪录片合集」") ? "S2" : "").filter(Boolean);
+  expect(order).toEqual(["G1", "S1", "S3", "G2", "S2"]);
+  // 从第一个分享向上移动：分组行在顶部，停留在分享上；顶部的分组行保持可见。
+  await press(keys.up, keys.up, keys.up, keys.up);
+  expect(frame().split("\n").find(item => item.includes("「某某合集」"))).toContain("「某某合集」");
+  await press("r"); expect(controller.commands.at(-1)).toEqual({ kind: "retry", id: "s_1" });
+  // 向下越过分组行：从“另一个分享”直接到“纪录片合集”。
+  await press(keys.down, keys.down, keys.down, keys.down, keys.down, "r");
+  expect(controller.commands.at(-1)).toEqual({ kind: "retry", id: "s_2" });
 });

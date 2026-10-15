@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Text, useInput, usePaste, useWindowSize } from "ink";
 import type { TuiController } from "./controller";
 import { createTheme, type Theme } from "./theme";
-import { buildRows, explain, scrollOffset, type Row } from "./view-model";
+import { buildRows, explain, scrollOffset, selectable, type Row } from "./view-model";
 import { MainPanel, MIN_COLUMNS, MIN_ROWS, panelLayout, type Size } from "./main-panel";
 import { CONFIRM_LINES, ConfirmDialog, DetailPage, PASTE_BOX_LINES, PasteBox, SETTINGS_ITEMS, SettingsPage } from "./pages";
 import { MAX_CONNECTIONS } from "../download/connections";
@@ -34,19 +34,30 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   const [setting, setSetting] = useState({ selected: 0, editing: false, error: null as string | null });
 
   const rows = useMemo(() => buildRows({ shares: snapshot.shares, files: snapshot.files, expanded, userPaused: snapshot.userPaused, missing: snapshot.localMissing }), [snapshot, expanded]);
-  const found = rows.findIndex(row => row.key === selectedKey);
-  const selected = found >= 0 ? found : Math.min(Math.max(0, rows.findIndex(row => row.kind === "file")), Math.max(0, rows.length - 1));
-  const row = rows[selected];
+  // 分组行不可选中：默认选第一个文件，没有文件时选第一个分享。
+  const found = rows.findIndex(row => row.key === selectedKey && selectable(row));
+  const firstFile = rows.findIndex(row => row.kind === "file");
+  const selected = found >= 0 ? found : firstFile >= 0 ? firstFile : Math.max(0, rows.findIndex(selectable));
+  const current = rows[selected];
+  const row = selectable(current) ? current : undefined;
   // 只要队列暂停或存在单项暂停，P 就是“全部开始”。
   const anyPaused = snapshot.userPaused || snapshot.shares.some(item => item.paused) || Object.values(snapshot.files).some(files => files.some(file => file.paused));
   const selectedPaused = (item: Row) => item.kind === "share" ? item.share.paused
     : item.file.paused || !!snapshot.shares.find(share => share.id === item.shareId)?.paused;
   const overlayLines = screen.kind === "confirm" || screen.kind === "quit" ? CONFIRM_LINES : screen.kind === "paste" ? PASTE_BOX_LINES : 0;
   const { listHeight } = panelLayout(size, snapshot, overlayLines);
-  const effectiveOffset = scrollOffset(offset, selected, listHeight, rows.length);
+  // 选中某组的第一个分享并滚到顶部时，把该组的目录行一起显示出来。
+  const scrolled = scrollOffset(offset, selected, listHeight, rows.length);
+  const effectiveOffset = scrolled === selected && selected > 0 && listHeight > 1 && rows[selected - 1]?.kind === "group" ? scrolled - 1 : scrolled;
   useEffect(() => { if (effectiveOffset !== offset) setOffset(effectiveOffset); }, [effectiveOffset, offset]);
 
-  const select = (index: number) => { const target = rows[Math.min(Math.max(index, 0), rows.length - 1)]; if (target) setSelectedKey(target.key); };
+  // 跳过分组行：先按移动方向找，到头后反向找。
+  const select = (index: number, step: 1 | -1) => {
+    const start = Math.min(Math.max(index, 0), rows.length - 1);
+    for (const direction of [step, -step]) {
+      for (let at = start; at >= 0 && at < rows.length; at += direction) { const target = rows[at]; if (selectable(target)) { setSelectedKey(target.key); return; } }
+    }
+  };
   const run = async (command: Parameters<TuiController["command"]>[0]) => {
     const result = await controller.command(command);
     if (!result.ok) controller.note({ icon: "✗", tone: "error", text: `操作失败：${explain(result.reason).reason}` });
@@ -88,10 +99,10 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
 
   useInput((input, key) => {
     if (key.ctrl || snapshot.stopping) return;
-    if (key.upArrow) select(selected - 1);
-    else if (key.downArrow) select(selected + 1);
-    else if (key.pageUp) select(selected - listHeight);
-    else if (key.pageDown) select(selected + listHeight);
+    if (key.upArrow) select(selected - 1, -1);
+    else if (key.downArrow) select(selected + 1, 1);
+    else if (key.pageUp) select(selected - listHeight, -1);
+    else if (key.pageDown) select(selected + listHeight, 1);
     else if (key.leftArrow && row) {
       const shareId = row.kind === "share" ? row.share.id : row.shareId;
       setExpanded(value => ({ ...value, [shareId]: false })); setSelectedKey(`s:${shareId}`);
@@ -122,7 +133,7 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   const detailFile = screen.kind === "detail" ? Object.values(snapshot.files).flat().find(file => file.id === screen.fileId) : undefined;
   // 详情页的文件记录被删除（释放后）时回到主面板。
   useEffect(() => { if (screen.kind === "detail" && !detailFile) setScreen({ kind: "main" }); }, [screen, detailFile]);
-  const detailRow = detailFile ? rows.find(item => item.kind === "file" && item.file.id === detailFile.id) : undefined;
+  const detailRow = detailFile ? rows.find((item): item is Row => item.kind === "file" && item.file.id === detailFile.id) : undefined;
   useInput((input, key) => {
     if (key.escape) setScreen({ kind: "main" });
     else if (input === "r" && detailFile) void run({ kind: "retry", id: detailFile.id });

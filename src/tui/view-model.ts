@@ -122,20 +122,30 @@ export function shareCounts(files: FileView[], userPaused: boolean, sharePaused 
   return counts;
 }
 
+// 分组行（add-task-controls 决策 8）：按分享的本地下载目录分组，只显示、不可选中。
+export type GroupRow = { kind: "group"; key: string; path: string; shares: number };
+export type ListRow = Row | GroupRow;
+export const selectable = (row: ListRow | undefined): row is Row => !!row && row.kind !== "group";
 export type Row = { kind: "share"; key: string; share: ShareView; counts: ShareCounts; expanded: boolean }
   | { kind: "file"; key: string; shareId: string; file: FileView; name: string; path: string; look: Look; location: Location };
 // 未完成的分享默认展开，全部完成的默认折叠；用户的折叠选择优先。
 export function buildRows(input: { shares: ShareView[]; files: Record<string, FileView[]>; expanded: Record<string, boolean | undefined>; userPaused: boolean;
-  missing?: ReadonlySet<string> }): Row[] {
+  missing?: ReadonlySet<string> }): ListRow[] {
   const missing = input.missing ?? new Set<string>();
-  const rows: Row[] = [];
-  for (const share of input.shares) {
-    const files = input.files[share.id] ?? [];
-    const expanded = input.expanded[share.id] ?? share.summary.status !== "completed";
-    rows.push({ kind: "share", key: `s:${share.id}`, share, counts: shareCounts(files, input.userPaused, share.paused, missing), expanded });
-    if (expanded) for (const file of files) {
-      rows.push({ kind: "file", key: `f:${file.id}`, shareId: share.id, file, name: fileName(file.relativePath), path: displayPath(file.relativePath),
-        look: fileLook(file, { userPaused: input.userPaused, sharePaused: share.paused, missing: missing.has(file.id) }), location: fileLocation(file, missing.has(file.id)) });
+  const rows: ListRow[] = [];
+  // 目录按首次出现的顺序排列，组内分享保持原顺序。
+  const groups = new Map<string, ShareView[]>();
+  for (const share of input.shares) groups.set(share.outputRoot, [...groups.get(share.outputRoot) ?? [], share]);
+  for (const [path, shares] of groups) {
+    rows.push({ kind: "group", key: `g:${path}`, path, shares: shares.length });
+    for (const share of shares) {
+      const files = input.files[share.id] ?? [];
+      const expanded = input.expanded[share.id] ?? share.summary.status !== "completed";
+      rows.push({ kind: "share", key: `s:${share.id}`, share, counts: shareCounts(files, input.userPaused, share.paused, missing), expanded });
+      if (expanded) for (const file of files) {
+        rows.push({ kind: "file", key: `f:${file.id}`, shareId: share.id, file, name: fileName(file.relativePath), path: displayPath(file.relativePath),
+          look: fileLook(file, { userPaused: input.userPaused, sharePaused: share.paused, missing: missing.has(file.id) }), location: fileLocation(file, missing.has(file.id)) });
+      }
     }
   }
   return rows;
