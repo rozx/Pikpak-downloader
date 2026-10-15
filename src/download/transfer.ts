@@ -9,7 +9,8 @@ import { retryAfter } from "../pikpak/protocol";
 
 import { DownloadError } from "./download-error";
 export { DownloadError } from "./download-error";
-export type DownloadTransport = (url: string, init: RequestInit) => Promise<Response>;
+import type { DownloadTransport } from "./range-worker";
+export type { DownloadTransport } from "./range-worker";
 async function prefix(file: LocalFile, size: bigint, bytes: bigint, signal?: AbortSignal): Promise<ContentHasher> {
   const hash = new ContentHasher(size); let offset = 0n;
   while (offset < bytes) {
