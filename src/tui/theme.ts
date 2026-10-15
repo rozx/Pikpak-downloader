@@ -5,13 +5,14 @@ const palette: Record<Tone, string> = {
   muted: "gray", text: "white", strong: "whiteBright", key: "yellowBright",
 };
 export type Highlight = { backgroundColor: string; color?: string } | { inverse: true };
-export type Theme = { enabled: boolean; tone(tone: Tone): string | undefined; selection: Highlight; title: Highlight; banner: Highlight };
+export type Theme = { enabled: boolean; tone(tone: Tone): string | undefined; paint(tone: Tone): { color: string } | Record<string, never>;
+  selection: Highlight; title: Highlight; banner: Highlight };
 
 // NO_COLOR 存在且非空时不输出颜色；选中行与标题改用反色，状态仍由图标与文字区分。
 export function createTheme(env: Record<string, string | undefined> = process.env): Theme {
   const enabled = !env.NO_COLOR;
   return {
-    enabled, tone: tone => enabled ? palette[tone] : undefined,
+    enabled, tone: tone => enabled ? palette[tone] : undefined, paint: tone => enabled ? { color: palette[tone] } : {},
     selection: enabled ? { backgroundColor: "blue" } : { inverse: true },
     title: enabled ? { backgroundColor: "blue", color: "whiteBright" } : { inverse: true },
     banner: enabled ? { backgroundColor: "yellow", color: "black" } : { inverse: true },
