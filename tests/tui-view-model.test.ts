@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { fileStates, type FileState } from "../src/state/model";
 import type { FileView, ShareView } from "../src/state/store";
-import { buildRows, describeEvent, explain, fileLocation, fileLook, knownReasons, pauseExplanation, scrollOffset, selectable, shareCounts, shareLocation, type ListRow } from "../src/tui/view-model";
+import { buildRows, describeEvent, explain, fileLocation, fileLook, knownReasons, pauseExplanation, scrollOffset, locationMark, selectable, shareCounts, shareLocation, type ListRow } from "../src/tui/view-model";
 
 const summary = (status: string, total: number, completed: number) => ({ status, total, completed, cancelled: 0, failed: 0, waiting: 0, active: total - completed, reason: null });
 const share = (id: string, status: string, total: number, completed: number): ShareView =>
@@ -41,15 +41,15 @@ test("分组行：未完成展开、已完成折叠，用户折叠优先，计�
   const shares = [share("s_1", "partial", 3, 1), share("s_2", "completed", 2, 2), share("s_3", "scanning", 0, 0)];
   const files = { s_1: [file("a", "completed"), file("b", "downloading"), file("c", "ready")], s_2: [file("d", "completed"), file("e", "completed")], s_3: [] };
   const rows = buildRows({ shares, files, expanded: {}, userPaused: false });
-  const label = (row: ListRow) => row.kind === "group" ? `G:${row.path}` : row.kind === "share" ? `S:${row.share.id}:${row.expanded}` : `F:${row.file.id}`;
-  expect(rows.map(label)).toEqual(["G:/out", "S:s_1:true", "F:a", "F:b", "F:c", "S:s_2:false", "S:s_3:true"]);
+  const label = (row: ListRow) => row.kind === "group" ? `G:${row.path}:${row.shares}` : row.kind === "share" ? `S:${row.share.id}:${row.expanded}` : `F:${row.file.id}`;
+  expect(rows.map(label)).toEqual(["G:/out:3", "S:s_1:true", "F:a", "F:b", "F:c", "S:s_2:false", "S:s_3:true"]);
   const fileRow = rows[2]!; expect(fileRow.kind === "file" && fileRow.name).toBe("a.mkv"); expect(fileRow.kind === "file" && fileRow.path).toBe("季/a.mkv");
   const folded = buildRows({ shares, files, expanded: { s_1: false, s_2: true }, userPaused: false });
-  expect(folded.map(label)).toEqual(["G:/out", "S:s_1:false", "S:s_2:true", "F:d", "F:e", "S:s_3:true"]);
+  expect(folded.map(label)).toEqual(["G:/out:3", "S:s_1:false", "S:s_2:true", "F:d", "F:e", "S:s_3:true"]);
   // 按本地下载目录分组：目录按首次出现排列，组内保持原顺序；分组行不可选中。
   const elsewhere = { ...share("s_4", "completed", 0, 0), outputRoot: "/other" };
   const grouped = buildRows({ shares: [shares[0]!, elsewhere, shares[1]!], files: {}, expanded: {}, userPaused: false });
-  expect(grouped.map(label)).toEqual(["G:/out", "S:s_1:true", "S:s_2:false", "G:/other", "S:s_4:false"]);
+  expect(grouped.map(label)).toEqual(["G:/out:2", "S:s_1:true", "S:s_2:false", "G:/other:1", "S:s_4:false"]);
   expect(grouped.map(selectable)).toEqual([false, true, true, false, true]);
   expect(shareCounts(files.s_1, false)).toMatchObject({ total: 3, completed: 1, downloading: 1, queued: 1, paused: 0 });
   expect(shareCounts(files.s_1, true)).toMatchObject({ downloading: 0, paused: 1, queued: 1 });
@@ -106,6 +106,13 @@ test("任务位置：已完成看本地文件是否仍在，未完成看断点�
   expect(shareLocation(shareCounts([done], false))).toEqual({ local: "full", cloud: false });
   expect(shareLocation(shareCounts([partial, fresh], false))).toEqual({ local: "partial", cloud: true });
   expect(shareLocation(shareCounts([fresh], false))).toEqual({ local: null, cloud: false });
+  // 每行一个图标：▣ 只在本地（只有部分数据时为灰色），⧉ 两处都有，☁ 只在云端，都不在时没有图标。
+  expect(locationMark({ local: "full", cloud: true })).toEqual({ mark: "⧉", tone: "active" });
+  expect(locationMark({ local: "full", cloud: false })).toEqual({ mark: "▣", tone: "done" });
+  expect(locationMark({ local: "missing", cloud: true })).toEqual({ mark: "☁", tone: "cloud" });
+  expect(locationMark({ local: "partial", cloud: true })).toEqual({ mark: "☁", tone: "cloud" });
+  expect(locationMark({ local: "partial", cloud: false })).toEqual({ mark: "▣", tone: "muted" });
+  expect(locationMark({ local: "missing", cloud: false })).toBe(null); expect(locationMark({ local: null, cloud: false })).toBe(null);
   const rows = buildRows({ shares: [share("s_1", "partial", 2, 1)], files: { s_1: [done, partial] }, expanded: {}, userPaused: false, missing: new Set(["a"]) });
   expect(rows.flatMap(row => row.kind === "file" ? [row.location] : [])).toEqual([{ local: "missing", cloud: false }, { local: "partial", cloud: true }]);
 });

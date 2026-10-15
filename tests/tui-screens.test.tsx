@@ -23,7 +23,7 @@ test("主面板：标题栏、分组、进度、事件区与按键提示", async
   const { frame } = mount(); await settle();
   const text = frame();
   for (const part of ["PikPak Downloader", "● 已登录", "云盘 21.0 GB / 10 TB", "本地剩余 412.0 GB", "剪贴板 ● 监听中",
-    "▼ ⌂☁ 「某某合集」  1/3 完成 · 1 下载中 · 1 排队", "▼ ⌂☁ 「纪录片合集」  0/2 完成 · 1 失败 · 1 等待", "▶ ⌂  「另一个分享」  2/2 完成",
+    "▼ ⧉ 「某某合集」  1/3 完成 · 1 下载中 · 1 排队", "▼ ☁ 「纪录片合集」  0/2 完成 · 1 失败 · 1 等待", "▶ ▣ 「另一个分享」  2/2 完成",
     "48%  198 MB/412 MB  2.7 MB/s  1分19秒", "失败 · 下载地址多次刷新后仍被拒绝", "等待云端空间",
     "22:33:40  ✓ episode01.mkv 校验通过，已完成", "Enter 详情", "p 暂停", "P 全部暂停"]) expect(text).toContain(part);
   expect(text).not.toContain("readme.txt");
@@ -61,11 +61,11 @@ test("列表超过一屏时随选中项滚动，标题栏与按键提示保持�
   await press(...Array(7).fill(keys.down));
   const bottom = frame();
   expect(bottom).toContain("PikPak Downloader"); expect(bottom).toContain("q 退出");
-  expect(bottom).toContain("▶ ⌂  「另一个分享」"); expect(bottom).not.toContain("「某某合集」  1/3");
+  expect(bottom).toContain("▶ ▣ 「另一个分享」"); expect(bottom).not.toContain("「某某合集」  1/3");
   await press(keys.up);
   expect(frame().split("\n").find(line => line.includes(">"))).toContain("part2.mp4");
   await press(...Array(6).fill(keys.up));
-  expect(frame()).toContain("▼ ⌂☁ 「某某合集」"); expect(frame()).toContain("q 退出");
+  expect(frame()).toContain("▼ ⧉ 「某某合集」"); expect(frame()).toContain("q 退出");
 });
 
 test("取消需要确认：y 下发取消，n 与 Esc 返回；已完成文件无需取消", async () => {
@@ -98,7 +98,7 @@ test("暂停与继续、重试、打开目录及操作失败提示", async () =>
 test("折叠与展开分享，Enter 在分享行切换折叠", async () => {
   const { frame, press } = mount(); await settle();
   await press(keys.left);
-  expect(frame()).toContain("▶ ⌂☁ 「某某合集」"); expect(frame()).not.toContain("episode02.mkv");
+  expect(frame()).toContain("▶ ⧉ 「某某合集」"); expect(frame()).not.toContain("episode02.mkv");
   await press(keys.right); expect(frame()).toContain("episode02.mkv");
   await press(keys.enter); expect(frame()).not.toContain("episode02.mkv");
 });
@@ -224,7 +224,7 @@ test("正在执行的文件显示动态图标；暂停或系统暂停时恢复�
   expect(SPINNER).toContain(icon());
   const first = icon(); await Bun.sleep(300);
   expect(SPINNER).toContain(icon()); expect(icon()).not.toBe(first);
-  expect(frame().split("\n").find(line => line.includes("episode03.mkv"))).toContain("·     episode03.mkv");
+  expect(frame().split("\n").find(line => line.includes("episode03.mkv"))).toContain("·    episode03.mkv");
   controller.update({ userPaused: true }); await settle();
   expect(icon()).toBe("⏸");
   controller.update({ userPaused: false, systemPause: { reason: "authentication", fileId: null } }); await settle();
@@ -365,23 +365,23 @@ test("x 在云盘中已没有副本的已完成任务上只删除记录；已完
   expect(frame()).toContain("已完成的删除任务记录"); expect(frame()).toContain("继续时从分享重新转存");
 });
 
-test("位置格在名称前：⌂☁ 两处都有、⌂ 只在本地、☁ 只在云端、留空都不在；名称上下对齐；记录删除后行消失，详情页回到主面板", async () => {
+test("位置图标在名称前，每行一个：▣ 只在本地、⧉ 两处都有、☁ 只在云端、留空都不在；名称上下对齐；记录删除后行消失，详情页回到主面板", async () => {
   const controller = new FakeController();
   const { frame, press } = mount(controller); await settle();
   const line = (name: string) => frame().split("\n").find(item => item.includes(name)) ?? "";
-  expect(line("episode01.mkv")).toMatch(/^ {5}> ✓  ⌂  episode01\.mkv/); expect(line("episode01.mkv")).toMatch(/已完成$/); // 只在本地
-  expect(line("episode02.mkv")).toMatch(/^ {7}\S  ⌂☁ episode02\.mkv/); // 下载中：本地有一部分，云端有副本
-  expect(line("episode03.mkv")).toMatch(/^ {7}·  {4}episode03\.mkv/); // 排队：都不在
-  expect(line("第一季")).toMatch(/^ {7}✗  ⌂☁ 第一季/);
+  expect(line("episode01.mkv")).toMatch(/^ {5}> ✓  ▣ episode01\.mkv/); expect(line("episode01.mkv")).toMatch(/已完成$/); // 只在本地
+  expect(line("episode02.mkv")).toMatch(/^ {7}\S  ☁ episode02\.mkv/); // 下载中：从云端下载
+  expect(line("episode03.mkv")).toMatch(/^ {7}· {4}episode03\.mkv/); // 排队：都不在
+  expect(line("第一季")).toMatch(/^ {7}✗  ☁ 第一季/);
   const nameAt = (name: string) => displayWidth(line(name).slice(0, line(name).indexOf(name)));
   expect(new Set(["episode01.mkv", "episode02.mkv", "episode03.mkv", "第一季", "part2.mp4"].map(nameAt)).size).toBe(1);
-  expect(line("「某某合集」")).toMatch(/^ {3}▼ ⌂☁ 「某某合集」/); expect(line("「另一个分享」")).toMatch(/^ {3}▶ ⌂  「另一个分享」/);
+  expect(line("「某某合集」")).toMatch(/^ {3}▼ ⧉ 「某某合集」/); expect(line("「另一个分享」")).toMatch(/^ {3}▶ ▣ 「另一个分享」/);
   const files = mockSnapshot().files;
   files.s_1 = files.s_1!.map(item => item.id === "f_1" ? { ...item, copyState: "retained" as const } : item);
   controller.update({ files }); await settle();
-  expect(line("episode01.mkv")).toMatch(/> ✓  ⌂☁ episode01\.mkv/); // 两处都有
+  expect(line("episode01.mkv")).toMatch(/> ✓  ⧉ episode01\.mkv/); // 两处都有
   controller.update({ localMissing: new Set(["f_1"]) }); await settle();
-  expect(line("episode01.mkv")).toMatch(/> ✓   ☁ episode01\.mkv/); // 只在云端
+  expect(line("episode01.mkv")).toMatch(/> ✓  ☁ episode01\.mkv/); // 只在云端
   expect(line("episode01.mkv")).toContain("已完成 · 本地文件已不在");
   expect(line("「某某合集」")).toContain("· 1 本地缺失");
   await press(keys.enter);
@@ -398,10 +398,10 @@ test("按本地下载目录分组：目录只在分组行显示一次；分组�
   const controller = new FakeController(snapshot);
   const { frame, press } = mount(controller); await settle();
   const lines = frame().split("\n");
-  // 分组行只有路径（粗体加下划线），分享行比它缩进一级。
-  expect(lines.filter(item => item.includes("PikPak-Test"))).toEqual([" C:\\Users\\demo\\Downloads\\PikPak-Test"]);
-  expect(lines.filter(item => item.includes("D:\\Other"))).toEqual([" D:\\Other"]);
-  const order = lines.filter(item => !/\d\d:\d\d:\d\d/.test(item)).map(item => item.startsWith(" C:\\") ? "G1" : item.startsWith(" D:\\") ? "G2" : item.includes("「某某合集」") ? "S1"
+  // 分组行：粗线夹住的路径与分享数；分享行比它缩进一级。
+  expect(lines.filter(item => item.includes("PikPak-Test"))).toEqual([" ━━ C:\\Users\\demo\\Downloads\\PikPak-Test ━━  2 个分享"]);
+  expect(lines.filter(item => item.includes("D:\\Other"))).toEqual([" ━━ D:\\Other ━━  1 个分享"]);
+  const order = lines.filter(item => !/\d\d:\d\d:\d\d/.test(item)).map(item => item.startsWith(" ━━ C:") ? "G1" : item.startsWith(" ━━ D:") ? "G2" : item.includes("「某某合集」") ? "S1"
     : item.includes("「另一个分享」") ? "S3" : item.includes("「纪录片合集」") ? "S2" : "").filter(Boolean);
   expect(order).toEqual(["G1", "S1", "S3", "G2", "S2"]);
   // 从第一个分享向上移动：分组行在顶部，停留在分享上；顶部的分组行保持可见。

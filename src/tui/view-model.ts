@@ -102,6 +102,17 @@ export function fileLocation(file: FileView, missing = false): Location {
 
 export type ShareCounts = { total: number; completed: number; downloading: number; transferring: number; queued: number; paused: number; failed: number; waiting: number; cancelled: number;
   local: number; partial: number; cloud: number; missing: number };
+// 位置图标（add-task-controls 决策 6）：每行只用一个单宽文本符号（不用 emoji）。
+// ▣ 只在本地（绿色；只有下载了一部分的数据、云端也没有副本时为灰色），⧉ 本地与云端都有（青色），☁ 只在云端（淡蓝色，含下载中的文件），都不在时留空。
+export const LOCATION_MARKS = { local: "\u25a3", both: "\u29c9", cloud: "\u2601" } as const;
+export function locationMark(location: Location): { mark: string; tone: Tone } | null {
+  const local = location.local === "full";
+  if (local && location.cloud) return { mark: LOCATION_MARKS.both, tone: "active" };
+  if (local) return { mark: LOCATION_MARKS.local, tone: "done" };
+  if (location.cloud) return { mark: LOCATION_MARKS.cloud, tone: "cloud" };
+  if (location.local === "partial") return { mark: LOCATION_MARKS.local, tone: "muted" };
+  return null;
+}
 // 分享的位置：有已完成且在本地的文件即为本地，否则有下载了一部分的文件即为部分；有文件在云端即为云端。
 export const shareLocation = (counts: ShareCounts): Location => ({ local: counts.local ? "full" : counts.partial ? "partial" : null, cloud: counts.cloud > 0 });
 export function shareCounts(files: FileView[], userPaused: boolean, sharePaused = false, missing: ReadonlySet<string> = new Set()): ShareCounts {
@@ -126,7 +137,7 @@ export function shareCounts(files: FileView[], userPaused: boolean, sharePaused 
 }
 
 // 分组行（add-task-controls 决策 8）：按分享的本地下载目录分组，只显示、不可选中。
-export type GroupRow = { kind: "group"; key: string; path: string };
+export type GroupRow = { kind: "group"; key: string; path: string; shares: number };
 export type ListRow = Row | GroupRow;
 export const selectable = (row: ListRow | undefined): row is Row => !!row && row.kind !== "group";
 export type Row = { kind: "share"; key: string; share: ShareView; counts: ShareCounts; expanded: boolean }
@@ -140,7 +151,7 @@ export function buildRows(input: { shares: ShareView[]; files: Record<string, Fi
   const groups = new Map<string, ShareView[]>();
   for (const share of input.shares) groups.set(share.outputRoot, [...groups.get(share.outputRoot) ?? [], share]);
   for (const [path, shares] of groups) {
-    rows.push({ kind: "group", key: `g:${path}`, path });
+    rows.push({ kind: "group", key: `g:${path}`, path, shares: shares.length });
     for (const share of shares) {
       const files = input.files[share.id] ?? [];
       const expanded = input.expanded[share.id] ?? share.summary.status !== "completed";
