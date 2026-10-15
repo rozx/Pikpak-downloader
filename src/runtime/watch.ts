@@ -17,15 +17,22 @@ import type { LocalFileSystem } from "../platform/files";
 
 const labels: Record<string, string> = { scanning: "正在扫描", scanned: "扫描完成", scan_incomplete: "扫描未完整完成", scan_waiting: "扫描等待处理",
   saving: "正在准备转存", downloading: "正在下载", completed: "已完成", waiting_space: "等待云端空间", paused: "执行已暂停", attention: "需要核对", file_waiting: "文件等待处理" };
-const printedPercent = new Map<string, number>();
-export function printEvent(event: RuntimeEvent): void {
-  if (event.type === "progress") {
-    // 进度事件每秒最多 4 次；同一文件的百分比未变化时不重复打印。
+// 纯文本进度：同一文件只在跨过 10% 整数倍、或距上次输出满 30 秒且百分比变化时追加一行；开始下载已有单独提示。
+export function progressPrinter(now: () => number = Date.now): (event: RuntimeEvent) => string | null {
+  const last = new Map<string, { decade: number; percent: number; at: number }>();
+  return event => {
+    if (event.type !== "progress" || !event.id) return null;
     const percent = event.size ? Number((event.bytes ?? 0n) * 100n / event.size) : 100;
-    if (event.id && printedPercent.get(event.id) === percent) return;
-    if (event.id) printedPercent.set(event.id, percent);
-    console.log(`下载进度 ${event.id}: ${percent}%`); return;
-  }
+    const decade = Math.floor(percent / 10);
+    const previous = last.get(event.id) ?? { decade: 0, percent, at: now() };
+    const print = decade > previous.decade || (percent !== previous.percent && now() - previous.at >= 30_000);
+    last.set(event.id, print ? { decade, percent, at: now() } : previous);
+    return print ? `下载进度 ${event.id}: ${percent}%` : null;
+  };
+}
+const printProgress = progressPrinter();
+export function printEvent(event: RuntimeEvent): void {
+  if (event.type === "progress") { const line = printProgress(event); if (line) console.log(line); return; }
   console.log(`${labels[event.type] ?? event.type}${event.id ? ` ${event.id}` : ""}${event.count !== undefined ? `，文件版本数 ${event.count}` : ""}${event.reason ? `，原因：${event.reason}` : ""}`);
 }
 export async function watch(store: Store, output: string | null, signal: AbortSignal): Promise<void> {
