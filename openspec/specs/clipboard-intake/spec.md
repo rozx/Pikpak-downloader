@@ -5,7 +5,7 @@
 ## Requirements
 ### Requirement: 前台剪贴板监听
 
-系统 SHALL 在 macOS 和 Windows 的前台会话（全屏界面或 `watch`）中监听文本剪贴板，除非用户在设置中关闭了监听。启动时 SHALL 检查当前文本一次，之后只处理新的复制事件；下载执行暂停时 SHALL 继续接收可持久化的请求。监听关闭期间系统 MUST NOT 读取剪贴板。
+系统 SHALL 在 macOS、Windows 和 Linux 的前台会话（全屏界面或 `watch`）中监听文本剪贴板，除非用户在设置中关闭了监听。Linux 上 SHALL 在 Wayland 会话中经 `wl-paste`、在 X11 会话中经 `xclip` 或 `xsel` 读取文本。启动时 SHALL 检查当前文本一次，之后只处理新的复制事件；下载执行暂停时 SHALL 继续接收可持久化的请求。监听关闭期间系统 MUST NOT 读取剪贴板。
 
 #### Scenario: 启动时已有分享
 - **WHEN** 用户启动前台会话且监听开启，当前剪贴板包含可识别分享文本
@@ -95,6 +95,10 @@
 #### Scenario: 剪贴板被暂时占用
 - **WHEN** 操作系统暂时拒绝读取剪贴板
 - **THEN** 系统等待后重试，恢复后继续监听，不进行无间隔忙循环
+
+#### Scenario: Linux 没有图形会话或剪贴板工具
+- **WHEN** Linux 上既没有 Wayland 也没有 X11 会话，或对应的剪贴板命令未安装
+- **THEN** 系统显示监听异常并按退避间隔重试，用户仍可通过粘贴输入提交分享
 
 ### Requirement: 手动粘贴输入
 
