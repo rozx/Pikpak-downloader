@@ -27,7 +27,7 @@ public static class PikpakLocalFiles {
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder path, uint length, uint flags);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool GetDiskFreeSpaceExW(string path, out ulong available, out ulong total, out ulong free);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool FlushFileBuffers(SafeFileHandle handle);
-  [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetFileInformationByHandle(SafeFileHandle handle, int type, IntPtr data, uint size);
+  [DllImport("ntdll.dll")] static extern int NtSetInformationFile(SafeFileHandle handle, out IoStatus status, IntPtr data, uint length, int informationClass);
   [DllImport("ntdll.dll")] static extern int NtCreateFile(out SafeFileHandle handle, uint access, ref Attributes attributes, out IoStatus status, IntPtr allocationSize, uint flags, uint share, uint disposition, uint options, IntPtr ea, uint eaLength);
   [DllImport("ntdll.dll")] static extern uint RtlNtStatusToDosError(int status);
   class Entry { public SafeFileHandle Handle; public FileStream Stream; public bool Directory; public string Volume; public uint Serial; }
@@ -124,8 +124,10 @@ public static class PikpakLocalFiles {
         for (int i=0;i<nameOffset+text.Length+2;i++) Marshal.WriteByte(data,i,0);
         Marshal.WriteIntPtr(data,rootOffset,destinationEntry.Handle.DangerousGetHandle());
         Marshal.WriteInt32(data,lengthOffset,text.Length); Marshal.Copy(text,0,IntPtr.Add(data,nameOffset),text.Length);
-        if (!SetFileInformationByHandle(file.Handle,3,data,(uint)(nameOffset+text.Length+2))) {
-          uint error=(uint)Marshal.GetLastWin32Error(); if (error==80 || error==183) return false; throw Failure(error);
+        // kernel32 的 FileRenameInfo 会把文件名按当前目录展开成绝对路径，与 RootDirectory 冲突（错误 87）；直接走 NT 接口保持相对名。
+        IoStatus renameStatus; int renameResult=NtSetInformationFile(file.Handle,out renameStatus,data,(uint)(nameOffset+text.Length+2),10);
+        if (renameResult<0) {
+          uint error=RtlNtStatusToDosError(renameResult); if (error==80 || error==183) return false; throw Failure(error);
         }
         file.Stream.Flush(true);
         return true;
