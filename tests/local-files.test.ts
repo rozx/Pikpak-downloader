@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { systemFiles } from "../src/platform/file-system";
 
-test.if(process.platform === "darwin" || process.platform === "win32")("目录句柄约束读写，拒绝符号链接或目录联接逃逸与覆盖发布", async () => {
+test.if(["darwin", "win32", "linux"].includes(process.platform))("目录句柄约束读写，拒绝符号链接或目录联接逃逸与覆盖发布", async () => {
   const path = await mkdtemp(join(tmpdir(), "pikpak-files-test-"));
   const filesystem = systemFiles(); const root = await filesystem.root(path);
   try {

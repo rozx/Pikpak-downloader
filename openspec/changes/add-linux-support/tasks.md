@@ -1,13 +1,13 @@
 ## 1. 平台分支
 
-- [ ] 1.1 `state/paths.ts` 增加 Linux 任务库目录（`$XDG_DATA_HOME` 为绝对路径时使用，否则 `~/.local/share`）。验收：单元测试覆盖已设置、未设置与相对路径三种情况。
-- [ ] 1.2 `auth/secrets.ts` 的 `Bun.secrets` 实现改名为 `SystemSecrets`，macOS 与 Linux 共用。验收：Linux 上 `systemSecrets()` 不再抛出 `unsupported_platform`，类型检查通过。
-- [ ] 1.3 `auth/login.ts` 与 `tui/open-directory.ts` 在 Linux 上使用 `xdg-open`；备份后同步目录改为除 Windows 外都做。验收：`directoryCommand("linux", …)` 返回 `xdg-open`，不支持的平台仍返回 `unsupported_platform`。
+- [x] 1.1 `state/paths.ts` 增加 Linux 任务库目录（`$XDG_DATA_HOME` 为绝对路径时使用，否则 `~/.local/share`）。验收：单元测试覆盖已设置、未设置与相对路径三种情况。
+- [x] 1.2 `auth/secrets.ts` 的 `Bun.secrets` 实现改名为 `SystemSecrets`，macOS 与 Linux 共用。验收：Linux 上 `systemSecrets()` 不再抛出 `unsupported_platform`，类型检查通过。
+- [x] 1.3 `auth/login.ts` 与 `tui/open-directory.ts` 在 Linux 上使用 `xdg-open`；备份后同步目录改为除 Windows 外都做。验收：`directoryCommand("linux", …)` 返回 `xdg-open`，不支持的平台仍返回 `unsupported_platform`。
 
 ## 2. 本地文件
 
-- [ ] 2.1 新增 `platform/linux-files.ts`：经 `bun:ffi` 绑定 libc，实现 `LocalDirectory` 与 `LocalFile`（目录句柄、身份、可用空间、不覆盖发布、目录同步），`file-system.ts` 在 Linux 上返回它。验收：`local-files.test.ts` 在 Linux 上通过，含符号链接逃逸与覆盖发布被拒绝。
-- [ ] 2.2 涉及真实文件系统的测试（`nativeFiles`）在 Linux 上运行。验收：在 Linux（WSL Ubuntu）上 `bun test` 全部通过。
+- [x] 2.1 新增 `platform/linux-files.ts`：经 `bun:ffi` 绑定 libc，实现 `LocalDirectory` 与 `LocalFile`（目录句柄、身份、可用空间、不覆盖发布、目录同步），`file-system.ts` 在 Linux 上返回它。验收：`local-files.test.ts` 在 Linux 上通过，含符号链接逃逸与覆盖发布被拒绝。
+- [x] 2.2 涉及真实文件系统的测试（`nativeFiles`）在 Linux 上运行。验收：在 Linux（WSL Ubuntu）上 `bun test` 全部通过。
 
 ## 3. 剪贴板
 

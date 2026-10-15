@@ -7,7 +7,7 @@ import { systemFiles } from "../src/platform/file-system";
 import type { LocalFileSystem } from "../src/platform/files";
 import { engineFixture } from "./fixtures/engine";
 
-const nativeFiles = process.platform === "darwin" || process.platform === "win32";
+const nativeFiles = ["darwin", "win32", "linux"].includes(process.platform);
 let files: LocalFileSystem | undefined;
 const localFiles = () => files ??= systemFiles();
 afterAll(async () => { await files?.close(); });

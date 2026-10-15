@@ -41,7 +41,7 @@ async function setup(content: Uint8Array) {
 }
 
 // 假 CDN：按 Range 返回内容，分 64 KiB 交出并让出事件循环，以便多个连接交错写入。
-function cdn(content: Uint8Array, shape: { serve?: (start: number, end: number) => Uint8Array; status?: (start: number) => number | undefined } = {}) {
+function cdn(content: Uint8Array, shape: { serve?: (start: number, end: number) => Uint8Array; status?: (start: number) => number | undefined; delay?: number } = {}) {
   const requests: Array<[number, number]> = []; let active = 0, maxActive = 0;
   const http: DownloadTransport = async (_url, init) => {
     const [, start, end] = /^bytes=(\d+)-(\d+)$/.exec(new Headers(init.headers).get("range")!)!.map(Number) as [number, number, number];
@@ -53,7 +53,7 @@ function cdn(content: Uint8Array, shape: { serve?: (start: number, end: number) 
     let offset = 0;
     const stream = new ReadableStream<Uint8Array>({
       async pull(controller) {
-        await Bun.sleep(0);
+        await Bun.sleep(shape.delay ?? 0);
         if (init.signal?.aborted) { active--; controller.error(init.signal.reason); return; }
         if (offset >= body.length) { active--; controller.close(); return; }
         controller.enqueue(body.slice(offset, offset + 65536)); offset += 65536;
@@ -81,7 +81,8 @@ function run(f: Awaited<ReturnType<typeof setup>>, local: MemoryFile, http: Down
 const stored = (f: Awaited<ReturnType<typeof setup>>) => f.store.delivery("account", f.file.id)!;
 
 test("多连接下载完成：内容与摘要正确，每个分块只请求一次，最终检查点覆盖整个文件且没有区间", async () => {
-  const content = bytes(4 * S + S / 2), f = await setup(content), local = new MemoryFile(), server = cdn(content);
+  // 每 64 KiB 停 1 ms：Linux 上 Bun.sleep(0) 几乎不耗时，分块会在慢启动放开第二个连接之前传完。
+  const content = bytes(4 * S + S / 2), f = await setup(content), local = new MemoryFile(), server = cdn(content, { delay: 1 });
   const job = run(f, local, server.http, 4);
   expect(await job.result).toEqual(f.digest);
   expect(local.data).toEqual(content);

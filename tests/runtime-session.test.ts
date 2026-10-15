@@ -14,7 +14,7 @@ import type { LocalFileSystem } from "../src/platform/files";
 import type { Clipboard } from "../src/intake/clipboard";
 import { engineFixture } from "./fixtures/engine";
 
-const nativeFiles = process.platform === "darwin" || process.platform === "win32";
+const nativeFiles = ["darwin", "win32", "linux"].includes(process.platform);
 let files: LocalFileSystem | undefined;
 const localFiles = () => files ??= systemFiles();
 afterAll(async () => { await files?.close(); });

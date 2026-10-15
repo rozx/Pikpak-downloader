@@ -12,7 +12,7 @@ import type { LocalFileSystem } from "../src/platform/files";
 import { engineFixture } from "./fixtures/engine";
 
 // 本地文件适配层在 macOS 与 Windows 上各有实现；Windows 实现背后是常驻桥接进程，测试结束时关闭。
-const nativeFiles = process.platform === "darwin" || process.platform === "win32";
+const nativeFiles = ["darwin", "win32", "linux"].includes(process.platform);
 let files: LocalFileSystem | undefined;
 const localFiles = () => files ??= systemFiles();
 afterAll(async () => { await files?.close(); });

@@ -9,7 +9,7 @@ import type { LocalFileSystem } from "../src/platform/files";
 import { engineFixture } from "./fixtures/engine";
 
 // 手动释放云端副本（add-task-controls 任务 3.1）：引擎层的调度排除、断点续传与云端操作锁。
-const nativeFiles = process.platform === "darwin" || process.platform === "win32";
+const nativeFiles = ["darwin", "win32", "linux"].includes(process.platform);
 let files: LocalFileSystem | undefined;
 const localFiles = () => files ??= systemFiles();
 afterAll(async () => { await files?.close(); });

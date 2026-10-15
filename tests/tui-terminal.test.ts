@@ -4,9 +4,15 @@ import { RESTORE_SEQUENCE } from "../src/tui/terminal";
 async function run(mode: string, signal?: NodeJS.Signals) {
   const child = Bun.spawn([process.execPath, "tests/fixtures/terminal-worker.ts", mode], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
   if (signal) {
-    const reader = child.stdout.getReader(); const first = await reader.read(); reader.releaseLock();
-    expect(new TextDecoder().decode(first.value)).toContain("ready");
+    // 读过的流在 Linux 上释放锁后仍被视为已读取，不能再交给 Response，改用同一个读取器读完。
+    const reader = child.stdout.getReader(), decoder = new TextDecoder();
+    const first = await reader.read();
+    expect(decoder.decode(first.value, { stream: true })).toContain("ready");
     child.kill(signal);
+    let stdout = "";
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) stdout += decoder.decode(chunk.value, { stream: true });
+    const [stderr, code] = await Promise.all([new Response(child.stderr).text(), child.exited]);
+    return { output: stdout + decoder.decode() + stderr, code };
   }
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   return { output: stdout + stderr, code };
