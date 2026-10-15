@@ -18,7 +18,7 @@ import { configuredConnections, saveConnections } from "./download/connections";
 import { configuredActiveFiles, saveActiveFiles } from "./runtime/active-files";
 import { storedTier, tierCap } from "./pikpak/tier";
 
-const help = `${about.name} ${about.version}（开发中）
+const help = `${about.name} ${about.version}
 把 PikPak 云盘作为下载中转空间。作者 ${about.author} · ${about.homepage}
 
 用法：pikpak-downloader              在交互终端中打开全屏界面（检查登录与下载目录后开始监听）
@@ -37,8 +37,6 @@ const help = `${about.name} ${about.version}（开发中）
   config --files <1-5>   设置同时下载的文件数（默认 1；免费账号只能 1）
   retry <任务ID>         开启新的有限重试周期
   cancel <任务ID>        停止调度并保留资源
-
-尚未完成真实综合验收；Windows 与其他架构仍需实际运行验证。
 `;
 
 // 打印服务端返回的授权范围与每项权限的判定；范围不含应用权限时说明无法确认。
