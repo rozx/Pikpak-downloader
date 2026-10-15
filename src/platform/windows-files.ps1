@@ -33,6 +33,7 @@ public static class PikpakLocalFiles {
   class Entry { public SafeFileHandle Handle; public FileStream Stream; public bool Directory; public string Volume; public uint Serial; }
   public class Identity { public string volume, file; }
   public class Info { public Identity identity; public string size; }
+  public class Native { public string path, serial, index, created; }
   static Dictionary<string, Entry> entries = new Dictionary<string, Entry>();
   static Exception Failure(uint error) {
     string code = error == 80 || error == 183 ? "EEXIST" : error == 2 || error == 3 ? "ENOENT"
@@ -89,6 +90,18 @@ public static class PikpakLocalFiles {
     Entry entry = Get(key); FileInfo info = NativeInfo(entry.Handle);
     if ((info.Flags & 0x400) != 0 || info.Volume != entry.Serial) throw new Exception("unsafe-path");
     return new Info { identity=new Identity { volume=entry.Volume, file=Pair(info.IndexHigh,info.IndexLow).ToString()+":"+Pair((uint)info.Created.dwHighDateTime,(uint)info.Created.dwLowDateTime).ToString() }, size=Pair(info.SizeHigh,info.SizeLow).ToString() };
+  }
+  // 供调用方用自己的文件描述符直接读写：返回 GUID 卷形式的完整路径，以及卷序列号、文件索引和创建时间，
+  // 调用方据此确认打开的是同一个文件（不是被替换的路径）。
+  public static Native NativeOf(string key) {
+    Entry entry = Get(key); if (entry.Directory) throw new Exception("native-failure");
+    FileInfo info = NativeInfo(entry.Handle);
+    if ((info.Flags & 0x400) != 0 || info.Volume != entry.Serial || info.Links != 1) throw new Exception("unsafe-path");
+    StringBuilder buffer = new StringBuilder(32768);
+    uint length = GetFinalPathNameByHandleW(entry.Handle, buffer, (uint)buffer.Capacity, 1);
+    if (length == 0 || length >= buffer.Capacity) throw new Exception("native-failure");
+    return new Native { path=buffer.ToString(), serial=info.Volume.ToString(), index=Pair(info.IndexHigh,info.IndexLow).ToString(),
+      created=Pair((uint)info.Created.dwHighDateTime,(uint)info.Created.dwLowDateTime).ToString() };
   }
   public static string Free(string key) {
     Entry entry = Get(key); ulong available,total,free;
@@ -151,6 +164,7 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
       'root' { $value = [PikpakLocalFiles]::Root([string]$r.path) }
       'child' { $value = [PikpakLocalFiles]::Child([string]$r.parent,[string]$r.name,[bool]$r.directory,[bool]$r.create,[bool]$r.readOnly) }
       'info' { $value = [PikpakLocalFiles]::Information([string]$r.id) }
+      'native' { $value = [PikpakLocalFiles]::NativeOf([string]$r.id) }
       'free' { $value = [PikpakLocalFiles]::Free([string]$r.id) }
       'read' { $value = [PikpakLocalFiles]::Read([string]$r.id,[string]$r.offset,[int]$r.length) }
       'write' { [PikpakLocalFiles]::Write([string]$r.id,[string]$r.offset,[string]$r.data) }

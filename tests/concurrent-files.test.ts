@@ -292,7 +292,12 @@ test.if(nativeFiles)("每个在途文件各自使用连接数设置，不因同�
     const reader = response.body!.getReader(); let open = true;
     const done = () => { if (open) { open = false; active.set(copy, active.get(copy)! - 1); } };
     const stream = new ReadableStream<Uint8Array>({
-      async pull(controller) { const part = await reader.read(); if (part.done) { done(); controller.close(); } else controller.enqueue(part.value); },
+      // 响应体放慢（每 64 KiB 约 20 ms），让慢启动有时间加入第二个连接；本地写入已是磁盘速度。
+      async pull(controller) {
+        const part = await reader.read();
+        if (part.done) { done(); controller.close(); return; }
+        for (let at = 0; at < part.value.byteLength; at += 65536) { controller.enqueue(part.value.subarray(at, at + 65536)); await Bun.sleep(20); }
+      },
       cancel() { done(); reader.cancel().catch(() => {}); },
     });
     return new Response(stream, { status: response.status, headers: response.headers });
