@@ -1,0 +1,134 @@
+# 合并到 main 的发布 PR 触发构建与发行：PR 须带 release 标签，且来源分支以 release/ 开头。
+# 版本号取合并提交中 package.json 的 version，标签为 v<version>；标签已存在时拒绝发布。
+name: Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/') &&
+      contains(github.event.pull_request.labels.*.name, 'release') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: 读取并核对版本号
+        id: version
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .version package.json)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::package.json 的 version 不是 x.y.z 格式：$version"
+            exit 1
+          fi
+          # 分支名后缀形如版本号时（release/0.8.0 或 release/v0.8.0），必须与 package.json 一致。
+          suffix="${HEAD_REF#release/}"
+          suffix="${suffix#v}"
+          if [[ "$suffix" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$suffix" != "$version" ]]; then
+            echo "::error::分支 $HEAD_REF 与 package.json 版本 $version 不一致"
+            exit 1
+          fi
+          tag="v$version"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag 已存在，请先升级 package.json 的版本号"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-latest
+            targets: bun-darwin-arm64 bun-darwin-x64
+          - os: windows-latest
+            targets: bun-windows-x64 bun-windows-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      # 原生模块需要 Node-API 头文件；Node 发行包自带 include/node。
+      - if: runner.os == 'macOS'
+        uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+
+      - if: runner.os == 'macOS'
+        name: 指定 Node-API 头文件目录
+        run: echo "NODE_API_HEADERS=$(dirname "$(dirname "$(command -v node)")")/include/node" >> "$GITHUB_ENV"
+
+      - run: bun install --frozen-lockfile
+
+      - name: 类型检查与测试
+        run: bun run check
+
+      - name: 构建单文件产物
+        run: bun run build ${{ matrix.targets }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ runner.os }}
+          path: |
+            dist/pikpak-downloader-*
+          if-no-files-found: error
+
+  release:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: dist
+          merge-multiple: true
+
+      - name: 生成校验和
+        working-directory: dist
+        run: |
+          ls -l
+          sha256sum pikpak-downloader-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: 创建标签与发行
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          TARGET: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$TARGET" \
+            --title "$TAG" \
+            --generate-notes
