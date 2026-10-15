@@ -134,6 +134,28 @@ windows-x64 产物已在 Claude Code 终端面板启动：中日韩名称按显�
 
 用户反馈验证界面的观感不及效果图。验证程序随后增加 `mock.tsx`，用 Ink 按确认的六张效果图绘制主面板、暂停与取消确认、详情、粘贴框、设置和登录页，用于在真实终端中对比颜色、蓝底选中行、圆角边框和列宽自适应。
 
+### Windows 实机冒烟（2026-10-15）
+
+在 Claude Code 终端面板（170×86）中以真实账号运行 `bun src/cli.ts`：启动检查后直接进入主面板；之前停在 21% 的真实分享文件从断点继续下载，进度、速度（约 264 KB/s）与剩余时间原地刷新，云盘容量在首次查询后显示；Ctrl+C 有界停止，退出后恢复原屏幕并打印"已停止，进度已保存。本次完成 0 个文件；还有 1 个未完成，下次启动会继续。"。编译后的 windows-x64 独立产物在另一实例持有执行锁时显示"已有实例正在使用任务库"。Windows Terminal 与传统控制台中的完整按键演练仍属 7.1。
+
+## 规格核对
+
+| 需求 | 场景 | 证据 |
+| --- | --- | --- |
+| terminal-ui 无参数进入交互界面 | 交互终端无参数启动；输出被重定向 | `tests/tui-startup.test.tsx`（重定向时纯文本帮助、无控制序列）；Windows 实机冒烟 |
+| terminal-ui 启动检查与引导 | 已有实例；首次未登录；首次未设置下载目录 | `tests/tui-startup.test.tsx`（全部分支、Esc 取消授权、回调端口释放）；编译产物已有实例提示 |
+| terminal-ui 任务面板与进度展示 | 原地刷新；超过一屏；需要用户处理 | `tests/tui-screens.test.tsx`（布局、滚动、横幅、窗口过小）；`tests/tui-live.test.ts`（每 100 ms 至多一次通知、刷新周期）；`tests/tui-view-model.test.ts` |
+| terminal-ui 面板内任务操作 | 取消下载中文件；重试失败文件；打开下载目录 | `tests/tui-screens.test.tsx`；`tests/runtime-session.test.ts`（取消后断点与副本保留）；`tests/tui-live.test.ts`（目录参数不经 shell）；实机打开随 7.1、7.2 |
+| terminal-ui 粘贴分享输入 | 带提取码的多行文本；无法识别 | `tests/tui-screens.test.tsx`（括号粘贴不提交、预览）；`tests/runtime-session.test.ts` |
+| terminal-ui 设置页与持久化偏好 | 修改下载目录；关闭剪贴板监听 | `tests/runtime-session.test.ts`（新目录只影响之后的分享、监听开关）；`tests/tui-screens.test.tsx` |
+| terminal-ui 颜色、图标与可读性 | 关闭颜色；中文文件名 | `tests/tui-format.test.ts`（`NO_COLOR`、按显示宽度省略）；`tests/tui-screens.test.tsx`（列对齐） |
+| terminal-ui 退出与终端恢复 | 正常退出；界面异常 | `tests/tui-terminal.test.ts`（异常、拒绝、信号、退出只恢复一次）；`tests/tui-screens.test.tsx`（两段式 Ctrl+C）；Windows 实机冒烟 |
+| cli-runtime 前台运行及正常退出 | 用户中断；下次继续；纯文本不刷屏 | `tests/lifecycle.test.ts`；`tests/interruption.test.ts`（断点续传）；`tests/watch-output.test.ts`；实机从断点继续 |
+| clipboard-intake 前台剪贴板监听 | 启动时已有分享；暂停期间接收；监听已关闭 | `tests/intake.test.ts`；`tests/runtime-session.test.ts`（用户暂停期间接收、关闭后不读取） |
+| clipboard-intake 手动粘贴输入 | 与剪贴板相同文本；只粘贴提取码 | `tests/runtime-session.test.ts`（合并并重扫、不拼接、不重复接收剪贴板）；`tests/tui-screens.test.tsx` |
+| transfer-queue 显式取消与保留记录 | 目标磁盘不可用；剪贴板保留已取消分享；未确认操作；界面中取消 | `tests/engine.test.ts`；`tests/runtime-session.test.ts`（重新复制显示已取消、界面取消保留断点与副本）；`tests/state.test.ts`、`tests/interruption.test.ts` |
+| transfer-queue 用户暂停队列 | 暂停下载中队列；重启后保持；与系统暂停并存 | `tests/engine.test.ts`（暂停不调度、并存）；`tests/runtime-session.test.ts`（中断当前步骤、重建会话仍暂停）；`tests/interruption.test.ts`（断点续传） |
+
 ## Open Questions
 
 无阻塞问题。

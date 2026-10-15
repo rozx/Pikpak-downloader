@@ -1,6 +1,6 @@
 import { afterAll, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/state/store";
@@ -166,6 +166,37 @@ test("手动提交与剪贴板同一规则，不与先前输入拼接，也不�
     expect((await loadShareAccess(f.secrets, updated.secretRef, "account", share.remoteId)).passCode).toBe("abcd");
     const reads = clip.state.reads; await until(() => clip.state.reads >= reads + 2);
     expect(received).toEqual([share.id, share.id]);
+  } finally { abort.abort(); await running; await f.close(); }
+});
+
+test("修改下载目录只影响之后接收的分享，不可用目录被拒绝", async () => {
+  const f = await storeFixture(); const next = join(f.root, "新目录"); await mkdir(next);
+  const session = new RuntimeSession(f.store, "account", fakeEngine(async () => { await Bun.sleep(5); return false; }).engine, f.receiver, fakeClipboard().clipboard);
+  const abort = new AbortController(); const running = session.run(abort.signal);
+  try {
+    expect(await session.command({ kind: "setOutputRoot", path: join(f.root, "missing") })).toEqual({ ok: false, reason: "output_unavailable" });
+    expect((await session.command({ kind: "setOutputRoot", path: next })).ok).toBe(true);
+    expect(f.store.config("output_root")).toBe(await realpath(next));
+    const result = await session.command({ kind: "submitText", text: "https://mypikpak.com/s/synthetic-next" });
+    expect(result.ok && f.store.share("account", result.ids[0]!).outputRoot).toBe(await realpath(next));
+    expect(f.store.share("account", f.share.id).outputRoot).toBe(f.root);
+  } finally { abort.abort(); await running; await f.close(); }
+});
+
+test("队列暂停期间仍接收并保存新分享；重新复制已取消的分享显示已取消且不自动恢复", async () => {
+  const f = await storeFixture(); f.store.setConfig("queue_paused", "1"); const events: RuntimeEvent[] = [];
+  const clip = fakeClipboard("https://mypikpak.com/s/synthetic-paused");
+  const session = new RuntimeSession(f.store, "account", fakeEngine(async () => { await Bun.sleep(5); return false; }).engine, f.receiver, clip.clipboard);
+  session.subscribe(event => events.push(event));
+  const abort = new AbortController(); const running = session.run(abort.signal);
+  try {
+    await until(() => events.some(event => event.type === "received"));
+    const share = f.store.findShare("account", "synthetic-paused")!;
+    expect(share.cancelled).toBe(false);
+    expect((await session.command({ kind: "cancel", id: share.id })).ok).toBe(true);
+    clip.state.sequence = "2"; await until(() => events.some(event => event.type === "received_cancelled"));
+    expect(f.store.share("account", share.id).cancelled).toBe(true);
+    expect(f.store.config("queue_paused")).toBe("1");
   } finally { abort.abort(); await running; await f.close(); }
 });
 

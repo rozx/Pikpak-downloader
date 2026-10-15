@@ -42,4 +42,4 @@
 
 - [ ] 7.1 Windows 实机完整演练，Windows Terminal 与传统控制台各一次：无参数启动、未登录时浏览器授权、设置目录、剪贴板接收与粘贴接收、下载、暂停、继续、取消、重试、详情、打开目录、q 退出并打印摘要。验收：结果写入 `design.md`，发现的问题修复后复测通过。
 - [ ] 7.2 macOS 实机完成与 7.1 相同的演练。验收：结果写入 `design.md`；无 macOS 环境时保持未勾选并作为发布门槛。
-- [ ] 7.3 逐条核对 `terminal-ui`、`cli-runtime`、`clipboard-intake`、`transfer-queue` 的需求与场景。验收：每条需求都能指向对应的自动测试或实测记录，`openspec validate add-interactive-tui --strict` 通过。
+- [x] 7.3 逐条核对 `terminal-ui`、`cli-runtime`、`clipboard-intake`、`transfer-queue` 的需求与场景。验收：每条需求都能指向对应的自动测试或实测记录，`openspec validate add-interactive-tui --strict` 通过。
