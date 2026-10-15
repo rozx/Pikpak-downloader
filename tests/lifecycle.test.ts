@@ -58,3 +58,21 @@ test("config --connections 校验 1–8 并在 status 中显示；监听占锁�
   } finally { await rm(root, { recursive: true, force: true }); }
 }, 30000);
 
+test("config --files 校验 1–5，status 显示配置值、账号等级与实际生效值", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pikpak-cli-test-"));
+  const run = async (...args: string[]) => {
+    const child = Bun.spawn([process.execPath, "src/cli.ts", ...args], { env: { ...process.env, PIKPAK_DOWNLOADER_STATE_DIR: root }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    return { output: await new Response(child.stdout).text(), error: await new Response(child.stderr).text(), code: await child.exited };
+  };
+  try {
+    expect((await run("config", "--files", "3")).code).toBe(0);
+    for (const bad of ["0", "6", "2.5", "-1"]) expect((await run("config", "--files", bad)).code).toBe(1);
+    const store = new Store(join(root, "tasks.sqlite"));
+    try { store.ensureAccount("account"); store.setConfig("active_account", "account"); } finally { store.close(); }
+    expect(JSON.parse((await run("status")).output).activeFiles).toEqual({ configured: 3, tier: "unknown", tierCheckedAt: null, effective: 1 });
+    const paid = new Store(join(root, "tasks.sqlite"));
+    try { paid.setConfig("account_tier", JSON.stringify({ account: "account", tier: "paid", at: Date.parse("2026-10-15T00:00:00Z") })); } finally { paid.close(); }
+    expect(JSON.parse((await run("status")).output).activeFiles).toEqual({ configured: 3, tier: "paid", tierCheckedAt: "2026-10-15T00:00:00.000Z", effective: 3 });
+  } finally { await rm(root, { recursive: true, force: true }); }
+}, 30000);
+

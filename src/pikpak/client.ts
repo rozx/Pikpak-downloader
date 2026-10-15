@@ -5,7 +5,8 @@ import { ProviderError, requestJson, transport, type Transport } from "./protoco
 
 export class PikpakClient {
   constructor(private readonly session: SessionManager, private readonly store: Store, private readonly http: Transport = transport) {}
-  async request(accountId: string, path: string, init: RequestInit = {}, beforeSend?: () => void): Promise<Record<string, unknown>> {
+  // quiet：辅助性只读请求（如账号等级）。它的 403 与 429 只抛给调用方，不暂停账号、不记录账号限流；401 仍按登录失效处理。
+  async request(accountId: string, path: string, init: RequestInit = {}, beforeSend?: () => void, options: { quiet?: boolean } = {}): Promise<Record<string, unknown>> {
     const delay = this.store.rateDelay(accountId);
     if (delay > 0) throw new ProviderError("drive", "rate_limited", 429, delay);
     const pause = this.store.paused(accountId);
@@ -19,6 +20,7 @@ export class PikpakClient {
       beforeSend?.();
       try { return await requestJson("drive", url.href, { ...init, headers }, this.http); }
       catch (error) {
+        if (options.quiet && error instanceof ProviderError && error.status !== 401) throw error;
         if (error instanceof ProviderError && error.status === 429) this.store.rateLimit(accountId, error.retryAfterMs ?? 60000);
         if (error instanceof ProviderError && (error.status === 402 || ["download_quota_exceeded", "download_traffic_not_enough", "download_flow_not_enough", "traffic_limit_exceeded"].includes(error.reason))) throw error;
         if (error instanceof ProviderError && error.status === 401 && attempt === 0 && (!init.method || init.method === "GET")) continue;

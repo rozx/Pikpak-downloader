@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { rejection } from "./fixtures/rejection";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,6 +56,22 @@ test("强制刷新遇到正在读取缓存会话时仍刷新一次", async () =>
   const f = await setup(3600);
   const [, token] = await Promise.all([f.manager.access("account"), f.manager.access("account", true)]);
   expect(token).toBe("new-access"); expect(f.stats.refreshed).toBe(1);
+});
+
+test("辅助性只读请求被拒绝或限流时只抛给调用方，不暂停账号、不记录账号限流", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pikpak-quiet-test-")); const store = new Store(join(dir, "db.sqlite"));
+  try {
+    store.ensureAccount("account");
+    const f = await setup(3600);
+    const http: Transport = async (url, init) => url.includes("/privilege/vip") ? Response.json({ error: "permission_denied" }, { status: 403 })
+      : url.includes("/limited") ? Response.json({ error: "too_many_requests" }, { status: 429, headers: { "retry-after": "30" } }) : f.http(url, init);
+    const api = new PikpakClient(f.manager, store, http);
+    expect((await rejection(api.request("account", "/drive/v1/privilege/vip", {}, undefined, { quiet: true }))).message).toContain("permission_denied");
+    expect(((await rejection(api.request("account", "/drive/v1/limited", {}, undefined, { quiet: true }))) as { status?: number }).status).toBe(429);
+    expect(store.paused("account")).toBe(null); expect(store.rateLimited("account")).toBe(false);
+    await rejection(api.request("account", "/drive/v1/privilege/vip"));
+    expect(store.paused("account")?.reason).toBe("permission");
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
 test("服务器已轮换但当前引用提交失败时暂停，重开可核对待提交代次", async () => {

@@ -14,6 +14,8 @@ import { clipboardWorker } from "./intake/clipboard-worker";
 import { watch } from "./runtime/watch";
 import { interruptible } from "./runtime/lifecycle";
 import { configuredConnections, saveConnections } from "./download/connections";
+import { configuredActiveFiles, saveActiveFiles } from "./runtime/active-files";
+import { storedTier, tierCap } from "./pikpak/tier";
 
 const help = `${about.name} ${about.version}（开发中）
 把 PikPak 云盘作为下载中转空间。作者 ${about.author} · ${about.homepage}
@@ -30,6 +32,7 @@ const help = `${about.name} ${about.version}（开发中）
   config --output <目录> 设置新分享的默认目录
   config --connections <1-8>
                          设置单个文件的下载连接数（默认 4）
+  config --files <1-5>   设置同时下载的文件数（默认 1；免费账号只能 1）
   retry <任务ID>         开启新的有限重试周期
   cancel <任务ID>        停止调度并保留资源
 
@@ -72,13 +75,18 @@ export async function runCli(args: string[]): Promise<void> {
         console.log(JSON.stringify({ id: file.id, state: file.state === "completed" ? "completed" : file.cancelled ? "cancelled" : file.state, retries: Number(file.retries), reason: file.lastError }));
       } else {
         const shares = args[1] ? [store.share(account, args[1])] : store.shares(account);
-        console.log(JSON.stringify({ paused: store.paused(account), connections: configuredConnections(store), tasks: shares.map(share => ({ id: share.id, ...store.summary(account, share.id) })) }, null, 2));
+        // status 不联网：账号等级取上一次会话读到的结果，未读过时按未知（同时只下载 1 个文件）显示。
+        const tier = storedTier(store, account), configured = configuredActiveFiles(store);
+        const activeFiles = { configured, tier: tier?.tier ?? "unknown", tierCheckedAt: tier ? new Date(tier.at).toISOString() : null,
+          effective: Math.min(configured, tierCap(tier?.tier ?? "unknown")) };
+        console.log(JSON.stringify({ paused: store.paused(account), connections: configuredConnections(store), activeFiles,
+          tasks: shares.map(share => ({ id: share.id, ...store.summary(account, share.id) })) }, null, 2));
       }
     } finally { store.close(); }
     return;
   }
   if (["config", "retry", "cancel", "login", "logout", "watch"].includes(command!)) {
-    if (command === "config" ? args.length !== 3 || !["--output", "--connections"].includes(args[1]!) : ["retry", "cancel"].includes(command!) && args.length !== 2) throw new AppError("invalid_input");
+    if (command === "config" ? args.length !== 3 || !["--output", "--connections", "--files"].includes(args[1]!) : ["retry", "cancel"].includes(command!) && args.length !== 2) throw new AppError("invalid_input");
     if (command === "login" && (args.length > 2 || (args[1] && args[1] !== "--force"))) throw new AppError("invalid_input");
     if (command === "logout" && args.length !== 1) throw new AppError("invalid_input");
     if (command === "watch" && args.length !== 1 && !(args.length === 3 && args[1] === "--output")) throw new AppError("invalid_input");
@@ -105,7 +113,9 @@ export async function runCli(args: string[]): Promise<void> {
           }
           return;
         }
-        if (command === "config" && args[1] === "--connections") {
+        if (command === "config" && args[1] === "--files") {
+          console.log(`已保存同时下载的文件数 ${saveActiveFiles(store, args[2]!)}；实际生效值受账号等级限制，免费账号只能同时下载 1 个文件。`);
+        } else if (command === "config" && args[1] === "--connections") {
           console.log(`已保存下载连接数 ${saveConnections(store, args[2]!)}；从下一个文件开始生效。`);
         } else if (command === "config") {
           const output = await realpath(resolve(args[2]!));
