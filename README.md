@@ -231,6 +231,7 @@ bun scripts/screenshots.tsx      # 用模拟数据重新生成 docs/images/ 中�
 ```
 
 - 构建目标为 `bun-{windows,darwin,linux}-{x64,arm64}`。macOS 原生模块需要 Xcode Command Line Tools 与 Node-API 头文件，可用 `NODE_API_HEADERS` 指定头文件目录；发行产物已内含运行时与原生适配，使用者无需安装这些工具。
+- Windows 产物的图标与文件信息在构建时写入，图标由 `scripts/icon.ts` 按像素图生成；macOS 与 Linux 的可执行文件不带图标。
 - `PIKPAK_DOWNLOADER_STATE_DIR` 可以另指任务库所在目录，供测试与本地试验使用。
 - 截图中的分享、文件与账号都是虚构的。修改界面后运行 `bun scripts/screenshots.tsx` 更新截图。
 
