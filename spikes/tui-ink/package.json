@@ -1,0 +1,20 @@
+{
+  "name": "pikpak-tui-ink-spike",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "scripts": {
+    "start": "bun app.tsx",
+    "typecheck": "tsc --noEmit",
+    "compile": "bun compile.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/react": "19.3.0",
+    "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "ink": "8.0.0",
+    "react": "19.3.1"
+  }
+}

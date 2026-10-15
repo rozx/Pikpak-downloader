@@ -4,13 +4,13 @@
 
 ## 1. Ink Packaging Gate
 
-- [ ] 1.1 建立隔离验证程序 `spikes/tui-ink/`：以精确版本引入 Ink、React，编写含可滚动列表、多行输入框、Ctrl+C 处理、备用屏幕进出、窗口缩放重排和中文名称的最小界面。验收：`bun build --compile` 在 `bun-darwin-arm64`、`bun-darwin-x64`、`bun-windows-x64`、`bun-windows-arm64` 四个目标均成功，并记录各产物体积。
+- [x] 1.1 建立隔离验证程序 `spikes/tui-ink/`：以精确版本引入 Ink、React，编写含可滚动列表、多行输入框、Ctrl+C 处理、备用屏幕进出、窗口缩放重排和中文名称的最小界面。验收：Bun 独立编译在 `bun-darwin-arm64`、`bun-darwin-x64`、`bun-windows-x64`、`bun-windows-arm64` 四个目标均成功，并记录各产物体积（结果与构建约束见 `design.md`"打包验证"）。
 - [ ] 1.2 在 Windows Terminal、Windows 传统控制台、macOS 终端分别实测验证程序：方向键、Enter、Esc、q、y/n 等原始按键；多行粘贴不触发提交（括号粘贴标记或整块输入判断）；窗口缩放后重排；退出备用屏幕后原终端内容恢复；中文列对齐；停止期间第二次 Ctrl+C 立即退出；未处理异常后终端恢复。验收：版本、体积与各终端结果写入 `design.md` 新增的"打包验证"小节；任一项失败则停止第 2 组以后的任务并回到评审。
 
 ## 2. Test Baseline and Dependencies
 
 - [ ] 2.1 修复 Windows 上的测试套件：查明并消除 `Store` 关闭后临时目录仍被占用导致的 `EBUSY` 清理失败；生命周期测试在 Windows 上无法用 `child.kill("SIGINT")` 模拟控制台 Ctrl+C，改为平台可行的方式或明确标注平台跳过并保留实机验证项。验收：Windows 上 `bun test tests` 除明确标注的平台跳过外全部通过；不得通过放宽断言掩盖问题。
-- [ ] 2.2 按第 1 组结论，把 `ink`、`react` 以精确版本加入运行时依赖，`@types/react`、`ink-testing-library` 加入开发依赖，更新 `bun.lock`；`tsconfig.json` 启用 `react-jsx` 并纳入 `src/**/*.tsx`、`tests/**/*.tsx`；开发机 Bun 版本与 `packageManager` 声明的 1.4.2 一致。验收：`bun run check` 通过，`bun run build` 四目标产物在无 Bun 的环境输出帮助和版本。
+- [ ] 2.2 按第 1 组结论，把 `ink`、`react` 以精确版本加入运行时依赖，`@types/react`、`ink-testing-library` 加入开发依赖，更新 `bun.lock`；`tsconfig.json` 启用 `react-jsx` 并纳入 `src/**/*.tsx`、`tests/**/*.tsx`；`scripts/build.ts` 改用 `Bun.build` 编译，以插件把 `react-devtools-core` 解析为空实现，并关闭 `autoloadDotenv` 与 `autoloadBunfig`；开发机 Bun 版本与 `packageManager` 声明的 1.4.2 一致。验收：`bun run check` 通过，`bun run build` 四目标产物在无 Bun 的环境输出帮助和版本。
 
 ## 3. Runtime Session and Engine
 

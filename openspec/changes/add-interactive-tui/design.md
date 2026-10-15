@@ -103,6 +103,33 @@ q 与 Ctrl+C 触发有界停止并显示"正在停止并保存进度"；停止�
 
 任务库结构不变，仅新增 `config` 键；旧版本读取到未知键时忽略。回退时移除界面入口即可，`watch` 与子命令不受影响。本变更须在 `add-clipboard-download-workflow` 归档后归档。
 
+## 打包验证
+
+### 1.1 编译结果（2026-10-14）
+
+验证程序 `spikes/tui-ink/` 使用 Ink 8.0.0、React 19.3.1、Bun 1.4.2，在 Windows 11 x64 开发机上交叉编译四个目标全部成功：
+
+| 目标 | 产物体积 |
+| --- | --- |
+| `bun-darwin-arm64` | 60.5 MiB |
+| `bun-darwin-x64` | 67.3 MiB |
+| `bun-windows-x64` | 83.2 MiB |
+| `bun-windows-arm64` | 75.1 MiB |
+
+同一 Bun 版本下现有业务 CLI 的 windows-x64 产物为 82.3 MiB，Ink 与 React 约增加 1 MiB。
+
+验证中确定的构建约束：
+
+- Ink 静态导入可选依赖 `react-devtools-core`（仅 `DEV=true` 时使用）。`--external` 不可行：Bun 把外部 import 提升到产物顶层，独立产物启动即因找不到该包退出。构建必须改用 `Bun.build`，以插件把它解析为无副作用的空实现。
+- 独立产物默认读取运行目录下的 `.env` 与 `bunfig.toml`，构建时关闭 `autoloadDotenv` 与 `autoloadBunfig`，避免用户目录中的文件改变程序行为。
+- Bun 1.3.8 不提供 `bun-windows-aarch64` 目标；开发与发布构建必须使用 `packageManager` 声明的 Bun 1.4.2。
+
+windows-x64 产物已在 Claude Code 终端面板启动：中日韩名称按显示宽度中间省略，进度条刷新正常，Ctrl+C 第一段进入停止状态并在退出后恢复原屏幕。省略后的名称会填满整列，正式界面的列之间需保留 1 列间隔。
+
+### 1.2 终端实测
+
+待完成：Windows Terminal、Windows 传统控制台、macOS 终端按 `spikes/tui-ink/README.md` 的清单逐项记录。
+
 ## Open Questions
 
-无阻塞问题。打包验证的结论（版本、产物体积、各终端表现）实施时补充到本文件。
+无阻塞问题。
