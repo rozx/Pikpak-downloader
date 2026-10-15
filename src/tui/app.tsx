@@ -216,8 +216,9 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   const keys: Array<[string, string]> = screen.kind === "confirm" ? [["y", "确认"], ["n", "返回"]]
     : screen.kind === "quit" ? [["y", "退出"], ["n", "返回"]]
     : screen.kind === "paste" ? [["Enter", "提交"], ["Esc", "取消"]]
-    : [["Enter", "详情"], ["r", "重试"], ["c", "取消"], ["p", row && selectedPaused(row) ? "继续" : "暂停"],
-      ["P", anyPaused ? "全部开始" : "全部暂停"], ["x/X", "释放/全部"], ["o", "目录"], ["a", "粘贴"], ["s", "设置"], ["q", "退出"]];
+    // 单项与全部合写，与“x/X 释放/全部”一致；有暂停时 P 是全部开始，写明“全部开始”。
+    : [["Enter", "详情"], ["r", "重试"], ["c", "取消"], ["p/P", `${row && selectedPaused(row) ? "继续" : "暂停"}/${anyPaused ? "全部开始" : "全部"}`],
+      ["x/X", "释放/全部"], ["o", "目录"], ["a", "粘贴"], ["s", "设置"], ["q", "退出"]];
   const overlay = screen.kind === "confirm" && screen.release
     ? <ConfirmDialog heading={screen.release.copies ? "释放云端副本" : "删除任务记录"} title={screen.title} confirm={screen.release.copies ? "确认释放" : "确认删除"}
       detail={screen.action === "releaseAll" && screen.release.copies ? "将永久删除 PikPak 中的这些副本（不进回收站），本地文件保留，任务记录一并删除；未完成的任务不受影响。" : releaseDetail(screen.release)} theme={theme} />
