@@ -7,7 +7,7 @@ import { RowLine, type Size } from "../src/tui/main-panel";
 import { Rule, SPINNER, creditLabel } from "../src/tui/parts";
 import { buildRows } from "../src/tui/view-model";
 import { about } from "../src/about";
-import { FakeController, keys, mockSnapshot, settle, stripAnsi } from "./fixtures/tui";
+import { FakeController, eventually, keys, mockSnapshot, settle, stripAnsi } from "./fixtures/tui";
 
 const mounted: Array<() => void> = [];
 afterEach(() => { for (const unmount of mounted.splice(0)) unmount(); });
@@ -153,11 +153,13 @@ test("粘贴框：多行粘贴不提交并实时预览；只粘贴提取码提�
   expect(frame()).toContain("✓ 识别到 1 个分享 · 提取码 ✓"); expect(controller.commands).toEqual([]);
   controller.result = { ok: true, ids: ["s_9"], issues: [] }; await press(keys.enter);
   expect(controller.commands).toEqual([{ kind: "submitText", text: "https://mypikpak.com/s/VOtest123\n\n \n\n提取码：ab12" }]);
-  expect(frame()).not.toContain("粘贴分享文本");
-  await press("a", "\x1b[200~提取码：ab12\x1b[201~");
-  expect(frame()).toContain("未识别到分享链接");
+  await eventually(() => expect(frame()).not.toContain("粘贴分享文本"));
+  // 提交是异步的，主面板的按键监听可能晚于固定等待才重新生效（CI 的 Windows 上出现过）：重复按 a 直到粘贴框打开。
+  await eventually(async () => { if (!frame().includes("粘贴分享文本")) await press("a"); expect(frame()).toContain("粘贴分享文本"); });
+  await press("\x1b[200~提取码：ab12\x1b[201~");
+  await eventually(() => expect(frame()).toContain("未识别到分享链接"));
   controller.result = { ok: true, ids: [], issues: [] }; await press(keys.enter);
-  expect(frame()).toContain("未识别到分享链接，未接收任何分享");
+  await eventually(() => expect(frame()).toContain("未识别到分享链接，未接收任何分享"));
   await press(keys.escape); expect(frame()).not.toContain("粘贴分享文本");
 });
 
