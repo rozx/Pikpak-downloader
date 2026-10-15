@@ -7,6 +7,20 @@ function codes(text: string): string[] {
   return [...text.matchAll(/(?:提取码|密码|pass\s*code|password)(?:\s*[:：=]\s*|\s+)([^\s，。,；;<>]+)/gi)]
     .map(match => trimPresentation(match[1]!));
 }
+const urls = /https?:\/\/[^\s<>"'，。；、）】》」]+/gi;
+// 官方复制的分享文本以空行隔开链接与提取码；只含码的块并入紧邻的、尚无任何码的链接块，其余块仍互相隔离。
+function blocks(text: string): string[] {
+  const result: string[] = [];
+  for (const block of text.split(/\r?\n\s*\r?\n/)) {
+    if (!block.trim()) continue;
+    const previous = result.at(-1);
+    if (previous !== undefined && !/https?:\/\//i.test(block) && codes(block).length && /https?:\/\//i.test(previous)
+      && !codes(previous.replace(urls, " ")).length && !/https?:\/\/\S*[?&](?:pwd|password|passcode|pass_code)=/i.test(previous)) {
+      result[result.length - 1] = `${previous}\n${block}`;
+    } else result.push(block);
+  }
+  return result;
+}
 function uniqueCode(values: string[]): string | null {
   const unique = [...new Set(values.filter(Boolean))];
   return unique.length <= 1 && unique.every(value => /^[A-Za-z0-9]{1,32}$/.test(value)) ? unique[0] ?? "" : null;
@@ -15,7 +29,7 @@ function uniqueCode(values: string[]): string | null {
 export function parseShares(text: string): ParseResult {
   if (text.length > 65536) return { shares: [], issues: text.includes("https://mypikpak.com/s/") ? ["input_too_large"] : [] };
   const result: ParseResult = { shares: [], issues: [] };
-  for (const block of text.split(/\r?\n\s*\r?\n/)) {
+  for (const block of blocks(text)) {
     const links: Link[] = [];
     const urlMatches = [...block.matchAll(/https?:\/\/[^\s<>"'，。；、）】》」]+/gi)];
     for (const match of urlMatches) {

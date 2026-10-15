@@ -32,6 +32,15 @@ test("多链接明确配对可接收，歧义和互相矛盾的码不猜测", ()
   expect(parseShares(`${first} https://other.example/s/another 密码 test`).shares).toHaveLength(0);
 });
 
+test("官方复制格式以空行隔开链接与提取码时仍配对，已有码或多链接不借用相邻码", () => {
+  expect(parseShares(`${first}\r\n\r\n \r\n\r\n提取码：demo`).shares).toEqual([{ shareId: "synthetic-one", passCode: "demo" }]);
+  expect(parseShares(`${first}\n\n密码 demo\n\n${second}\n\n密码 test`).shares)
+    .toEqual([{ shareId: "synthetic-one", passCode: "demo" }, { shareId: "synthetic-two", passCode: "test" }]);
+  expect(parseShares(`${first} 密码 demo\n\n密码 test`).shares).toEqual([{ shareId: "synthetic-one", passCode: "demo" }]);
+  expect(parseShares(`${first}?pwd=demo\n\n密码 test`).shares).toEqual([{ shareId: "synthetic-one", passCode: "demo" }]);
+  expect(parseShares(`${first}\n${second}\n\n密码 demo`).shares).toHaveLength(0);
+});
+
 test("轮询同一事件只接收一次，重复制相同文本触发新请求且保持原目标", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pikpak-intake-test-")); const store = new Store(join(dir, "db.sqlite"));
   store.ensureAccount("account");
