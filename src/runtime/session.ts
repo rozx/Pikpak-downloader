@@ -8,12 +8,13 @@ import type { IntakeReceiver, IntakeResult } from "../intake/receiver";
 import { pollClipboard, type Clipboard } from "../intake/clipboard";
 import type { Engine, RuntimeEvent } from "./engine";
 import { saveConnections } from "../download/connections";
+import { saveActiveFiles } from "./active-files";
 
 export type SessionCommand =
   | { kind: "retry"; id: string } | { kind: "cancel"; id: string }
   | { kind: "pauseQueue" } | { kind: "resumeQueue" }
   | { kind: "submitText"; text: string } | { kind: "setOutputRoot"; path: string }
-  | { kind: "setClipboardWatch"; enabled: boolean } | { kind: "setDownloadConnections"; count: number };
+  | { kind: "setClipboardWatch"; enabled: boolean } | { kind: "setDownloadConnections"; count: number } | { kind: "setActiveFiles"; count: number };
 export type CommandResult = { ok: true; ids: string[]; issues: string[] } | { ok: false; reason: string };
 // stopActive / isPooled 对应下载池（add-concurrent-file-downloads）；只有串行执行器的测试替身可以不提供。
 export type SessionEngine = Pick<Engine, "step" | "resumeLocalPause" | "resumeTrafficPause" | "reconcile" | "blockPersistence" | "subscribe">
@@ -126,6 +127,7 @@ export class RuntimeSession {
         const root = await writableDirectory(command.path);
         this.store.setConfig("output_root", root); this.receiver.setOutputRoot(root);
       } else if (command.kind === "setDownloadConnections") saveConnections(this.store, command.count);
+      else if (command.kind === "setActiveFiles") saveActiveFiles(this.store, command.count);
       else if (command.kind === "setClipboardWatch") {
         this.store.setConfig("clipboard_watch", command.enabled ? "1" : "0");
         if (!command.enabled) await this.stopIntake(); else if (this.running) this.startIntake();

@@ -6,6 +6,7 @@ import { buildRows, explain, scrollOffset, type Row } from "./view-model";
 import { MainPanel, MIN_COLUMNS, MIN_ROWS, panelLayout, type Size } from "./main-panel";
 import { CONFIRM_LINES, ConfirmDialog, DetailPage, PASTE_BOX_LINES, PasteBox, SETTINGS_ITEMS, SettingsPage } from "./pages";
 import { MAX_CONNECTIONS } from "../download/connections";
+import { MAX_ACTIVE_FILES } from "../runtime/active-files";
 
 type Screen = { kind: "main" } | { kind: "detail"; fileId: string } | { kind: "settings" } | { kind: "paste" }
   | { kind: "confirm"; id: string; title: string; back: Screen } | { kind: "quit" };
@@ -138,6 +139,9 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
       // 到达 1 或上限时不再发出命令。
       const count = snapshot.connections + (key.rightArrow ? 1 : -1);
       if (count >= 1 && count <= MAX_CONNECTIONS) void run({ kind: "setDownloadConnections", count });
+    } else if (setting.selected === 3 && (key.leftArrow || key.rightArrow)) {
+      const count = snapshot.activeFiles.configured + (key.rightArrow ? 1 : -1);
+      if (count >= 1 && count <= MAX_ACTIVE_FILES) void run({ kind: "setActiveFiles", count });
     }
   }, { isActive: screen.kind === "settings" });
 
@@ -149,7 +153,7 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
     return <DetailPage file={detailFile} shareTitle={share?.title ?? detailFile.shareId} targetPath={controller.targetPath(detailFile.id)} userPaused={snapshot.userPaused} size={size} theme={theme} />;
   }
   if (screen.kind === "settings") {
-    return <SettingsPage outputRoot={snapshot.outputRoot} clipboardOn={snapshot.clipboard !== "off"} connections={snapshot.connections} selected={setting.selected} editing={setting.editing}
+    return <SettingsPage outputRoot={snapshot.outputRoot} clipboardOn={snapshot.clipboard !== "off"} connections={snapshot.connections} activeFiles={snapshot.activeFiles} selected={setting.selected} editing={setting.editing}
       draft={draft} error={setting.error} size={size} theme={theme} />;
   }
   const keys: Array<[string, string]> = screen.kind === "confirm" ? [["y", "确认"], ["n", "返回"]]

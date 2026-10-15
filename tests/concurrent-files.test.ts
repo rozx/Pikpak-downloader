@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { systemFiles } from "../src/platform/file-system";
-import type { LocalFileSystem } from "../src/platform/files";
+import type { LocalDirectory, LocalFile, LocalFileSystem } from "../src/platform/files";
 import type { PikpakClient } from "../src/pikpak/client";
 import { Drive } from "../src/pikpak/drive";
 import { Engine, type RuntimeEvent } from "../src/runtime/engine";
@@ -175,3 +175,107 @@ test.if(nativeFiles)("会话：取消其中一个在途文件时其他文件继�
     expect(second.engine.activeFiles()).toEqual([]);
   } finally { stop.abort(); await run; await g.close(); }
 }, 60000);
+
+// 包装真实文件系统：write 被调用第 failAt 次时抛出指定错误，模拟多个文件同时写入时磁盘写满。
+function failingFiles(base: LocalFileSystem, failAt: number, error: Error): LocalFileSystem {
+  let writes = 0;
+  const wrapFile = (file: LocalFile): LocalFile => ({
+    info: () => file.info(), read: (position, length) => file.read(position, length),
+    write: async (position, data) => { if (++writes === failAt) throw error; return file.write(position, data); },
+    truncate: size => file.truncate(size), sync: () => file.sync(), close: () => file.close(),
+  });
+  // 每个包装后的目录都带着真实目录，发布时把真实目标交给原生实现。
+  const wrapDirectory = (directory: LocalDirectory): LocalDirectory & { inner: LocalDirectory } => ({ inner: directory,
+    identity: () => directory.identity(), freeBytes: () => directory.freeBytes(),
+    child: async (name, create) => wrapDirectory(await directory.child(name, create)),
+    file: async (name, create, readOnly) => wrapFile(await directory.file(name, create, readOnly)),
+    publish: (name, target, targetName) => directory.publish(name, (target as LocalDirectory & { inner?: LocalDirectory }).inner ?? target, targetName),
+    sync: () => directory.sync(), close: () => directory.close(),
+  });
+  return { root: async path => wrapDirectory(await base.root(path)), close: async () => {} };
+}
+
+test.if(nativeFiles)("取消分享时停止该分享的全部在途文件", async () => {
+  const f = await engineFixture(localFiles(), 3); f.state.limit = 10n ** 9n; f.store.setConfig("max_active_files", "3");
+  const { engine } = instrument(f, { delayMs: 1500 });
+  const session = new RuntimeSession(f.store, "account", engine, new IntakeReceiver(f.store, f.secrets, "account", f.root), clipboard());
+  const abort = new AbortController(); const running = session.run(abort.signal);
+  try {
+    await eventually(() => expect(engine.activeFiles().length).toBeGreaterThanOrEqual(2), 10000);
+    expect((await session.command({ kind: "cancel", id: f.share.id })).ok).toBe(true);
+    expect(engine.activeFiles()).toEqual([]);
+    expect(f.store.files("account").every(file => file.cancelled && file.state !== "completed")).toBe(true);
+  } finally { abort.abort(); await running; await f.close(); }
+}, 60000);
+
+test.if(nativeFiles)("一个文件被账号限流：记录账号限流并停止其余在途文件，不回收任何副本", async () => {
+  const f = await engineFixture(localFiles(), 3); f.state.limit = 10n ** 9n; f.store.setConfig("max_active_files", "3");
+  const { engine } = instrument(f, { delayMs: 300, respond: url => url.endsWith("/copy-2") ? new Response(null, { status: 429, headers: { "retry-after": "61" } }) : undefined });
+  try {
+    await drain(engine);
+    expect(f.store.rateLimited("account")).toBe(true); expect(engine.activeFiles()).toEqual([]); expect(f.state.deleted).toHaveLength(0);
+    const limited = f.store.files("account").filter(file => file.lastError === "rate_limited");
+    expect(limited).toHaveLength(1);
+  } finally { await f.close(); }
+}, 60000);
+
+test.if(nativeFiles)("多个文件同时写入时本地磁盘写满：暂停执行并停止全部在途文件，恢复后全部完成", async () => {
+  const f = await engineFixture(localFiles(), 3, [64 * 1024, 64 * 1024, 64 * 1024]); f.state.limit = 10n ** 9n; f.store.setConfig("max_active_files", "3");
+  const disk = failingFiles(localFiles(), 4, Object.assign(Error("ENOSPC"), { code: "ENOSPC" }));
+  const slow = async (url: string, init: RequestInit) => { await Bun.sleep(200); return f.fetch(url, init); };
+  const engine = new Engine(f.store, f.secrets, new Drive(f.api, "account"), disk, () => {}, slow, async () => {}, { tier: paid });
+  try {
+    await drain(engine);
+    expect(f.store.paused("account")?.reason).toBe("local_space"); expect(engine.activeFiles()).toEqual([]);
+    f.store.resume("account", { authenticated: true, permitted: true, writable: true, hasSpace: true, targetAvailable: true, trafficAvailable: true });
+    const healthy = new Engine(f.store, f.secrets, new Drive(f.api, "account"), localFiles(), () => {}, f.fetch, async () => {}, { tier: paid });
+    await drain(healthy);
+    expect(completed(f)).toBe(3);
+  } finally { await f.close(); }
+}, 60000);
+
+test.if(nativeFiles)("一个文件的云端副本版本变化只影响它自己：记录版本变化并重新扫描，其他文件完成", async () => {
+  const f = await engineFixture(localFiles(), 3); f.state.limit = 10n ** 9n; f.store.setConfig("max_active_files", "3");
+  // 第二个副本转存完成后，第一次下载请求到达时把它的元数据改为另一个版本。
+  const { engine } = instrument(f, { delayMs: 200, respond: url => {
+    const copy = url.endsWith("/copy-2") ? f.state.cloud.get("copy-2") : undefined;
+    if (copy) f.state.cloud.set("copy-2", { ...copy, hash: "f".repeat(40) });
+    return undefined;
+  } });
+  try {
+    await drain(engine);
+    const files = f.store.files("account");
+    expect(files.filter(file => file.state === "completed")).toHaveLength(2);
+    expect(files.filter(file => file.lastError === "version_changed")).toHaveLength(1);
+    expect(f.store.paused("account")).toBe(null);
+  } finally { await f.close(); }
+}, 60000);
+
+test.if(nativeFiles)("多个文件下载中停止会话，重新启动后各自从断点继续完成", async () => {
+  const f = await engineFixture(localFiles(), 3, [64 * 1024, 64 * 1024, 64 * 1024]); f.state.limit = 10n ** 9n; f.store.setConfig("max_active_files", "3");
+  const slowStream = async (url: string, init: RequestInit) => {
+    const response = await f.fetch(url, init); const bytes = new Uint8Array(await response.arrayBuffer());
+    const stream = new ReadableStream<Uint8Array>({ async start(controller) {
+      for (let offset = 0; offset < bytes.length; offset += 4096) {
+        if (init.signal?.aborted) { controller.error(init.signal.reason); return; }
+        controller.enqueue(bytes.slice(offset, offset + 4096)); await Bun.sleep(60);
+      }
+      controller.close();
+    } });
+    return new Response(stream, { status: response.status, headers: response.headers });
+  };
+  const first = new Engine(f.store, f.secrets, new Drive(f.api, "account"), localFiles(), () => {}, slowStream, async () => {}, { tier: paid });
+  const session = new RuntimeSession(f.store, "account", first, new IntakeReceiver(f.store, f.secrets, "account", f.root), clipboard());
+  const abort = new AbortController(); const running = session.run(abort.signal);
+  try {
+    await eventually(() => expect(first.activeFiles().length).toBe(3), 10000);
+    await Bun.sleep(400);
+    abort.abort(); await running;
+    expect(first.activeFiles()).toEqual([]); expect(completed(f)).toBe(0);
+    const resumed = new Engine(f.store, f.secrets, new Drive(f.api, "account"), localFiles(), () => {}, f.fetch, async () => {}, { tier: paid });
+    await drain(resumed);
+    expect(completed(f)).toBe(3);
+    for (const file of f.store.files("account")) expect(await readFile(f.store.delivery("account", file.id)!.targetPath)).toEqual(f.sources.find(source => source.id === file.sourceId)!.bytes);
+  } finally { abort.abort(); await running; await f.close(); }
+}, 60000);
+

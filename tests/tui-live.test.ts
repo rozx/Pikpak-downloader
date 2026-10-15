@@ -31,7 +31,7 @@ test("快照来自任务库只读视图，包含暂停、目录与剪贴板状�
     const snapshot = f.live.snapshot();
     expect(snapshot.shares.map(share => share.title)).toEqual(["某某合集"]);
     expect(snapshot.files[f.share.id]!.map(file => file.id)).toEqual([f.file.id]);
-    expect(snapshot).toMatchObject({ userPaused: true, systemPause: { reason: "authentication" }, outputRoot: f.root, clipboard: "on", quota: { usage: 10n, limit: 100n }, localFree: 5000n, connections: 4 });
+    expect(snapshot).toMatchObject({ userPaused: true, systemPause: { reason: "authentication" }, outputRoot: f.root, clipboard: "on", quota: { usage: 10n, limit: 100n }, localFree: 5000n, connections: 4, activeFiles: { configured: 1, effective: 1, tier: "unknown" } });
   } finally { await f.close(); }
 });
 
@@ -111,3 +111,16 @@ test("打开目录：按平台构造参数且不经过 shell，目录不存在�
     expect(launched).toHaveLength(1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("快照中的同时下载文件数取配置值与账号等级上限中的较小值", async () => {
+  let tier: "paid" | "free" | "unknown" = "paid";
+  const f = await fixture({ tier: () => tier });
+  try {
+    f.store.setConfig("max_active_files", "3");
+    f.live.start(); await Bun.sleep(30);
+    expect(f.live.snapshot().activeFiles).toEqual({ configured: 3, effective: 3, tier: "paid" });
+    tier = "free"; f.emit({ type: "command", reason: "setActiveFiles" }); await Bun.sleep(150);
+    expect(f.live.snapshot().activeFiles).toEqual({ configured: 3, effective: 1, tier: "free" });
+  } finally { await f.close(); }
+});
+

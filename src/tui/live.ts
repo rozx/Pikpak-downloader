@@ -8,11 +8,13 @@ import { fileName } from "./format";
 import { SpeedMeter } from "./speed";
 import { openDirectory } from "./open-directory";
 import { configuredConnections } from "../download/connections";
+import { configuredActiveFiles } from "../runtime/active-files";
+import { tierCap, type Tier } from "../pikpak/tier";
 
 export type LiveOptions = {
   store: Store; accountId: string; session: Pick<RuntimeSession, "subscribe" | "command">;
   quota: () => Promise<{ usage: bigint; limit: bigint }>; localFree: () => Promise<bigint>;
-  stop: () => void; forceExit: () => void; open?: (path: string) => Promise<OpenResult>;
+  stop: () => void; forceExit: () => void; open?: (path: string) => Promise<OpenResult>; tier?: () => Tier;
   now?: () => number; snapshotMs?: number; flushMs?: number; quotaMs?: number; localMs?: number; maxEvents?: number;
 };
 // 这些事件前后会发生转存、回收或交付，云盘容量随之变化。
@@ -120,7 +122,11 @@ export class LiveController implements TuiController {
     for (const [id, value] of this.progress) progress[id] = { ...value, rate: this.meter.rate(id), eta: this.meter.eta(id, value.size) };
     return { shares, files, quota: this.quota, localFree: this.localFree, clipboard: this.clipboard,
       userPaused: store.config("queue_paused") === "1", systemPause: store.paused(accountId), progress, events: [...this.events],
-      outputRoot: store.config("output_root"), stopping: this.stopping, connections: configuredConnections(store) };
+      outputRoot: store.config("output_root"), stopping: this.stopping, connections: configuredConnections(store), activeFiles: this.activeFiles() };
+  }
+  private activeFiles(): TuiSnapshot["activeFiles"] {
+    const configured = configuredActiveFiles(this.options.store), tier = this.options.tier?.() ?? "unknown";
+    return { configured, tier, effective: Math.min(configured, tierCap(tier)) };
   }
   // 重建快照后合并通知，界面重绘频率不超过每 flushMs 一次。
   private refresh(): void {

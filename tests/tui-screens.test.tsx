@@ -248,3 +248,51 @@ test("设置页调整下载连接数：显示当前值，←→ 发出命令，�
   await press(keys.up, keys.up); expect(frame()).toContain("←→ 调整");
 });
 
+test("设置页调整同时下载文件数：←→ 发出命令，到达 1 或 5 后不越界；受账号等级限制时说明实际生效值", async () => {
+  const controller = new FakeController();
+  const { frame, press } = mount(controller); await settle();
+  await press("s", keys.down, keys.down, keys.down);
+  expect(frame()).toContain("同时下载文件数"); expect(frame()).toContain("会员最多 5 个，免费账号只能 1 个"); expect(frame()).toContain("←→ 调整");
+  await press(keys.right, keys.left);
+  expect(controller.commands).toEqual([{ kind: "setActiveFiles", count: 2 }]);
+  controller.update({ activeFiles: { configured: 5, effective: 5, tier: "paid" } }); await settle();
+  await press(keys.right); expect(controller.commands).toHaveLength(1);
+  await press(keys.left); expect(controller.commands.at(-1)).toEqual({ kind: "setActiveFiles", count: 4 });
+  expect(frame()).not.toContain("实际");
+  controller.update({ activeFiles: { configured: 3, effective: 1, tier: "free" } }); await settle();
+  expect(frame()).toContain("实际 1 · 免费账号同时只能下载 1 个文件");
+  controller.update({ activeFiles: { configured: 3, effective: 1, tier: "unknown" } }); await settle();
+  expect(frame()).toContain("暂时无法读取账号等级");
+});
+
+function concurrentSnapshot() {
+  const snapshot = mockSnapshot(), mb = 1048576n;
+  const files = { ...snapshot.files, s_1: snapshot.files.s_1!.map(item => item.id === "f_3" ? { ...item, state: "downloading" as const } : item) };
+  return { ...snapshot, files, activeFiles: { configured: 3, effective: 3, tier: "paid" as const },
+    progress: { ...snapshot.progress, f_3: { bytes: 10n * mb, size: 380n * mb, rate: 1.3 * 1048576, eta: 300 } } };
+}
+
+test("同时下载数大于 1 时标题栏显示在途文件数与合计速度；窄窗口依次省略本地剩余、云盘、合计速度、在途文件数", async () => {
+  const cases: Array<[number, string[], string[]]> = [
+    [100, ["下载中 2/3", "合计 4.0 MB/s"], ["云盘", "本地剩余"]],
+    [80, ["下载中 2/3"], ["合计", "云盘", "本地剩余"]],
+    [60, [], ["下载中", "合计", "云盘", "本地剩余"]],
+  ];
+  for (const [columns, shown, hidden] of cases) {
+    const { frame } = mount(new FakeController(concurrentSnapshot()), { columns, rows: 24 }); await settle();
+    const [header = "", rule = ""] = frame().split("\n");
+    for (const part of shown) expect(header).toContain(part);
+    for (const part of hidden) expect(header).not.toContain(part);
+    expect(header).toContain("● 已登录"); expect(header).toContain("剪贴板 ● 监听中");
+    expect(displayWidth(header.trimEnd())).toBe(displayWidth(rule.trimEnd()));
+  }
+  // 两行进度同时原地刷新，各自显示速度与动态图标。
+  const { frame } = mount(new FakeController(concurrentSnapshot()), { columns: 100, rows: 24 }); await settle();
+  const rows = frame().split("\n").filter(line => line.includes("episode02.mkv") || line.includes("episode03.mkv"));
+  expect(rows).toHaveLength(2);
+  for (const row of rows) { expect(row).toMatch(/MB\/s/); expect(SPINNER).toContain(row.trim().replace(/^>\s*/, "").charAt(0)); }
+  // 暂停时不显示。
+  const paused = mount(new FakeController({ ...concurrentSnapshot(), userPaused: true }), { columns: 100, rows: 24 }); await settle();
+  expect(paused.frame().split("\n")[0]).not.toContain("下载中");
+});
+

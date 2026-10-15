@@ -3,6 +3,7 @@ import type { FileView, ShareView } from "../state/store";
 import type { CommandResult, SessionCommand } from "../runtime/session";
 import { parseShares } from "../intake/parse";
 import type { LogLine } from "./view-model";
+import type { Tier } from "../pikpak/tier";
 
 export type Progress = { bytes: bigint; size: bigint; rate: number | null; eta: number | null };
 export type LogEntry = LogLine & { at: number };
@@ -11,6 +12,8 @@ export type TuiSnapshot = {
   quota: { usage: bigint; limit: bigint } | null; localFree: bigint | null;
   clipboard: "on" | "off" | "unavailable"; userPaused: boolean; systemPause: Pause | null;
   progress: Record<string, Progress>; events: LogEntry[]; outputRoot: string | null; stopping: boolean; connections: number;
+  // 同时下载的文件数：配置值、账号等级与实际生效值（add-concurrent-file-downloads）。
+  activeFiles: { configured: number; effective: number; tier: Tier };
 };
 export type PastePreview = { shares: number; paired: number; issues: string[] };
 export type OpenResult = { ok: true } | { ok: false; reason: string };

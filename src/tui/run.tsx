@@ -55,8 +55,8 @@ export async function runTui(): Promise<number> {
     start: async account => {
       const state = requireStore(), root = state.config("output_root");
       if (!root) throw new AppError("output_unavailable");
-      const { session, drive } = await prepareRuntime(state, account, root, filesystem, () => {});
-      const controller = new LiveController({ store: state, accountId: account, session, quota: () => drive.quota(),
+      const { session, drive, tier } = await prepareRuntime(state, account, root, filesystem, () => {});
+      const controller = new LiveController({ store: state, accountId: account, session, quota: () => drive.quota(), tier: () => tier.current,
         localFree: async () => { const directory = await filesystem.root(root); try { return await directory.freeBytes(); } finally { await directory.close(); } },
         // 有界停止：会话 10 秒内仍未结束则强制退出；任务库按可随时中断设计。
         stop: () => { runtime.abort(); setTimeout(() => finish(130), 10_000).unref(); },
