@@ -112,7 +112,9 @@ export async function runCli(args: string[]): Promise<void> {
   throw new AppError("invalid_input");
 }
 
-if (import.meta.main) {
-  try { await runCli(process.argv.slice(2)); }
+export async function main(args = process.argv.slice(2)): Promise<void> {
+  try { await runCli(args); }
   catch (error) { console.error(publicError(error)); process.exitCode = 1; }
 }
+
+if (import.meta.main) await main();

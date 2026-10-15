@@ -123,6 +123,7 @@ q 与 Ctrl+C 触发有界停止并显示"正在停止并保存进度"；停止�
 - Ink 静态导入可选依赖 `react-devtools-core`（仅 `DEV=true` 时使用）。`--external` 不可行：Bun 把外部 import 提升到产物顶层，独立产物启动即因找不到该包退出。构建必须改用 `Bun.build`，以插件把它解析为无副作用的空实现。
 - 独立产物默认读取运行目录下的 `.env` 与 `bunfig.toml`，构建时关闭 `autoloadDotenv` 与 `autoloadBunfig`，避免用户目录中的文件改变程序行为。
 - Bun 1.3.8 不提供 `bun-windows-aarch64` 目标；开发与发布构建必须使用 `packageManager` 声明的 Bun 1.4.2。
+- 经 `Bun.build` 编译的独立产物中，入口模块的 `import.meta.main` 为 false（命令行 `bun build --compile` 为 true）。依赖该判断的 `src/cli.ts` 不能直接作为编译入口；发行构建使用无条件执行的 `src/main.ts`，`bun src/cli.ts` 的开发用法保持不变。
 
 windows-x64 产物已在 Claude Code 终端面板启动：中日韩名称按显示宽度中间省略，进度条刷新正常，Ctrl+C 第一段进入停止状态并在退出后恢复原屏幕。省略后的名称会填满整列，正式界面的列之间需保留 1 列间隔。
 
