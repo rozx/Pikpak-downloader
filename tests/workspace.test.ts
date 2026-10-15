@@ -7,6 +7,7 @@ import { FileWorkspace } from "../src/download/workspace";
 import { systemFiles } from "../src/platform/file-system";
 import type { LocalFileSystem } from "../src/platform/files";
 import { Store } from "../src/state/store";
+import { Database } from "bun:sqlite";
 import { rejection } from "./fixtures/rejection";
 
 // 本地文件适配层在 macOS 与 Windows 上各有实现；Windows 实现背后是常驻桥接进程，测试结束时关闭。
@@ -67,3 +68,36 @@ test.if(nativeFiles)("临时路径出现用户替换文件时不覆盖或接管"
     await rejection(workspace.temporary(file));
   } finally { await workspace?.close(); store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test.if(nativeFiles)("打开工作区期间分享被迁移到新目录时，按新目录重新打开并记录新目录的身份", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pikpak-workspace-race-")); const store = new Store(join(root, "db.sqlite"));
+  const before = join(root, "old"), after = join(root, "new");
+  await Bun.write(join(before, ".keep"), ""); await Bun.write(join(after, ".keep"), "");
+  const base = localFiles(); let moved = false;
+  // 第一次读取旧目录身份时，模拟设置页把默认目录改到新目录并迁移尚未开始的分享。
+  const racing: LocalFileSystem = { close: async () => {}, root: async path => {
+    const directory = await base.root(path);
+    return Object.assign(Object.create(directory), {
+      identity: async () => { const value = await directory.identity(); if (!moved && path === before) { moved = true; store.moveUnstartedShares("account", after); } return value; },
+      close: () => directory.close(), child: directory.child.bind(directory), file: directory.file.bind(directory), sync: directory.sync.bind(directory),
+      freeBytes: directory.freeBytes.bind(directory), publish: directory.publish.bind(directory),
+    });
+  } };
+  try {
+    store.ensureAccount("account"); const share = store.accept("account", "race", before, "secret");
+    const workspace = await FileWorkspace.open(store, "account", share.id, racing);
+    try {
+      expect(moved).toBe(true);
+      expect(store.share("account", share.id).outputRoot).toBe(after);
+      const expected = await base.root(after);
+      try {
+        const bound = new Database(join(root, "db.sqlite"), { readonly: true });
+        try {
+          const row = bound.query<{ volume: string; identity: string }, [string]>("SELECT root_volume AS volume,root_identity AS identity FROM shares WHERE id=?").get(share.id)!;
+          expect({ volume: row.volume, file: row.identity }).toEqual(await expected.identity());
+        } finally { bound.close(); }
+      } finally { await expected.close(); }
+    } finally { await workspace.close(); }
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+

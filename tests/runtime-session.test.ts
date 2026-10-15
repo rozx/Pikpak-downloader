@@ -50,7 +50,7 @@ async function storeFixture() {
     close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
-test("命令在两次步骤之间按序执行", async () => {
+test("命令按提交顺序立即执行，不等当前步骤结束", async () => {
   const f = await storeFixture(); const log: string[] = []; let release!: () => void; let steps = 0;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const { engine } = fakeEngine(async () => {
@@ -62,15 +62,17 @@ test("命令在两次步骤之间按序执行", async () => {
   const abort = new AbortController(); const running = session.run(abort.signal);
   try {
     await until(() => log.includes("step-start"));
-    const results = Promise.all([session.command({ kind: "retry", id: f.first.id }), session.command({ kind: "cancel", id: f.second.id }), session.command({ kind: "resumeQueue" })]);
-    await Bun.sleep(50); expect(log).toEqual(["step-start"]);
-    release(); expect((await results).every(result => result.ok)).toBe(true);
-    expect(log).toEqual(["step-start", "step-end", "command:retry", "command:cancel", "command:resumeQueue"]);
+    const results = await Promise.all([session.command({ kind: "retry", id: f.first.id }), session.command({ kind: "cancel", id: f.second.id }),
+      session.command({ kind: "resumeQueue" }), session.command({ kind: "setDownloadConnections", count: 6 })]);
+    expect(results.every(result => result.ok)).toBe(true);
+    expect(log).toEqual(["step-start", "command:retry", "command:cancel", "command:resumeQueue", "command:setDownloadConnections"]);
+    expect(f.store.config("download_connections")).toBe("6");
+    release(); await until(() => log.includes("step-end"));
     expect(f.store.file("account", f.first.id).state).toBe("ready"); expect(f.store.file("account", f.second.id).cancelled).toBe(true);
   } finally { abort.abort(); await running; await f.close(); }
 });
 
-test("暂停和取消当前执行项会中断当前步骤，取消其他文件不中断", async () => {
+test("暂停队列和取消当前执行项会先中断当前步骤；取消其他文件立即生效且不中断", async () => {
   const f = await storeFixture(); const log: string[] = []; let steps = 0; let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const fake = fakeEngine(async signal => {
@@ -85,10 +87,10 @@ test("暂停和取消当前执行项会中断当前步骤，取消其他文件�
   const abort = new AbortController(); const running = session.run(abort.signal);
   try {
     await until(() => log.includes("step-1-start"));
-    const other = session.command({ kind: "cancel", id: f.second.id });
-    await Bun.sleep(80); expect(log).toEqual(["step-1-start"]);
-    expect((await session.command({ kind: "cancel", id: f.first.id })).ok).toBe(true); await other;
-    expect(log.slice(0, 4)).toEqual(["step-1-start", "step-1-aborted", `command:cancel:${f.second.id}`, `command:cancel:${f.first.id}`]);
+    expect((await session.command({ kind: "cancel", id: f.second.id })).ok).toBe(true);
+    expect(log).toEqual(["step-1-start", `command:cancel:${f.second.id}`]);
+    expect((await session.command({ kind: "cancel", id: f.first.id })).ok).toBe(true);
+    expect(log.slice(0, 4)).toEqual(["step-1-start", `command:cancel:${f.second.id}`, "step-1-aborted", `command:cancel:${f.first.id}`]);
     await until(() => log.includes("step-2-start"));
     expect((await session.command({ kind: "pauseQueue" })).ok).toBe(true);
     expect(log.slice(-2)).toEqual(["step-2-aborted", "command:pauseQueue:"]);

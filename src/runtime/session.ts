@@ -31,10 +31,13 @@ export async function writableDirectory(path: string): Promise<string> {
   } catch { throw new AppError("output_unavailable"); }
 }
 
-// 前台会话：剪贴板接收、执行器循环与界面命令共用一个调度点；命令只在两次步骤之间执行。
+// 前台会话：剪贴板接收、执行器循环与界面命令共用一个调度点（add-task-controls 决策 1）。
+// 大多数命令按提交顺序立即执行；只有暂停队列、以及目标正是当前串行步骤所处理项的暂停或取消，
+// 才先中断当前步骤，等它在安全点返回后、开始下一个步骤之前执行。
 export class RuntimeSession {
   private readonly listeners = new Set<(event: RuntimeEvent) => void>();
   private readonly pending: Pending[] = [];
+  private chain: Promise<unknown> = Promise.resolve();
   private active: { shareId?: string; fileId?: string } = {};
   private stepAbort: AbortController | null = null;
   private halt: AbortController | null = null;
@@ -50,14 +53,21 @@ export class RuntimeSession {
   }
   private emit(event: RuntimeEvent): void { for (const listener of this.listeners) listener(event); }
 
-  // 暂停和针对当前执行项（或其所属分享）的取消会先中断当前步骤；结果在命令真正写入任务库后返回。
+  // 结果在命令真正写入任务库后返回。
   command(command: SessionCommand): Promise<CommandResult> {
     if (this.stopped) return Promise.resolve({ ok: false, reason: "stopped" });
-    return new Promise(resolve => {
-      this.pending.push({ command, resolve });
-      if (command.kind === "pauseQueue" || (command.kind === "cancel" && (command.id === this.active.fileId || command.id === this.active.shareId))) this.stepAbort?.abort();
-      this.wake?.();
-    });
+    if (this.interrupts(command)) {
+      return new Promise(resolve => { this.pending.push({ command, resolve }); this.stepAbort?.abort(); this.wake?.(); });
+    }
+    const result = this.chain.then(() => this.apply(command));
+    this.chain = result.then(() => {}, () => {});
+    void result.then(() => this.wake?.());
+    return result;
+  }
+  // 需要先停下当前串行步骤的命令；下载池中的目标由 apply 中的 stopActive 停下，不必中断步骤。
+  private interrupts(command: SessionCommand): boolean {
+    if (command.kind === "pauseQueue") return true;
+    return command.kind === "cancel" && (command.id === this.active.fileId || command.id === this.active.shareId);
   }
 
   async run(signal: AbortSignal): Promise<void> {

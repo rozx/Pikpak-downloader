@@ -10,10 +10,22 @@ export class FileWorkspace {
   private readonly paths = new Map<string, string>();
   private constructor(private readonly store: Store, private readonly accountId: string, private readonly shareId: string) {}
   static async open(store: Store, accountId: string, shareId: string, fs: LocalFileSystem): Promise<FileWorkspace> {
-    const share = store.share(accountId, shareId); const workspace = new FileWorkspace(store, accountId, shareId);
-    const root = await fs.root(share.outputRoot);
+    for (let attempt = 0; ; attempt++) {
+      const share = store.share(accountId, shareId);
+      const root = await fs.root(share.outputRoot);
+      let identity;
+      try { identity = await root.identity(); } catch (error) { await root.close(); throw error; }
+      // 打开期间默认目录可能被修改，这个尚未开始的分享随之迁移到新目录：按新目录重新打开。
+      // 这里的比较与写入根目录身份之间没有 await，迁移不会插在两者之间。
+      if (store.share(accountId, shareId).outputRoot !== share.outputRoot && attempt < 3) { await root.close(); continue; }
+      return FileWorkspace.bind(store, accountId, share, root, identity);
+    }
+  }
+  private static async bind(store: Store, accountId: string, share: { id: string; outputRoot: string; remoteId: string }, root: LocalDirectory,
+    identity: Awaited<ReturnType<LocalDirectory["identity"]>>): Promise<FileWorkspace> {
+    const shareId = share.id, workspace = new FileWorkspace(store, accountId, shareId);
     try {
-      store.bindRoot(accountId, shareId, await root.identity());
+      store.bindRoot(accountId, shareId, identity);
       workspace.opened.set("@root", root); workspace.paths.set("@root", share.outputRoot);
       await workspace.ensure("@share", "@root", safeName(store.shareTitle(accountId, shareId) ?? "PikPak", `~${shortId(share.remoteId)}`));
       await workspace.ensure("@temp", "@share", ".pikpak-staging");
