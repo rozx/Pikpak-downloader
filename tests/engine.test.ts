@@ -240,3 +240,52 @@ test.if(nativeFiles)("取消永久不可用目标上的任务后，其他目标�
     expect(f.store.share("account", f.share.id).cancelled).toBe(true); expect(f.state.deleted).toHaveLength(0);
   } finally { await f.close(); await rm(otherRoot, { recursive: true, force: true }); }
 });
+
+const twoChunks = 2 * 8388608 + 4099;
+const rangeStart = (init: RequestInit) => Number(/^bytes=(\d+)-/.exec(new Headers(init.headers).get("range")!)![1]);
+
+test.if(nativeFiles)("引擎按配置连接数走分段路径，进度单调增加，记住限流后降低的并发；单连接配置走顺序路径", async () => {
+  const signal = new AbortController().signal;
+  const f = await fixture(1, [twoChunks]); f.state.limit = 10n ** 12n;
+  const events: RuntimeEvent[] = []; let limitedOnce = false;
+  const fetch = async (url: string, init: RequestInit) => {
+    if (rangeStart(init) === 8388608 && !limitedOnce) { limitedOnce = true; return new Response(null, { status: 429, headers: { "retry-after": "1" } }); }
+    return f.fetch(url, init);
+  };
+  const engine = new Engine(f.store, f.secrets, new Drive(f.api, "account"), localFiles(), event => events.push(event), fetch, async () => {});
+  try {
+    for (let i = 0; i < 6 && await engine.step(signal); i++) {}
+    const file = f.store.files("account")[0]!;
+    expect(file.state).toBe("completed"); expect(limitedOnce).toBe(true);
+    expect(f.store.delivery("account", file.id)?.ranges?.mode).toBe("parallel");
+    expect(await readFile(f.store.delivery("account", file.id)!.targetPath)).toEqual(f.sources[0]!.bytes);
+    expect((engine as unknown as { concurrency: Map<string, number> }).concurrency.get("account")).toBe(2);
+    const progress = events.filter(event => event.type === "progress");
+    for (const [index, event] of progress.entries()) {
+      expect(event).toMatchObject({ id: file.id, size: BigInt(twoChunks) });
+      if (index > 0) expect(event.bytes! >= progress[index - 1]!.bytes!).toBe(true);
+    }
+    expect(f.state.deleted).toHaveLength(0);
+  } finally { await f.close(); }
+  const single = await fixture(1, [twoChunks]); single.state.limit = 10n ** 12n; single.store.setConfig("download_connections", "1");
+  try {
+    for (let i = 0; i < 6 && await single.engine.step(signal); i++) {}
+    const file = single.store.files("account")[0]!;
+    expect(file.state).toBe("completed"); expect(single.store.delivery("account", file.id)?.ranges).toBe(null);
+  } finally { await single.close(); }
+}, 60000);
+
+test.if(nativeFiles)("分段下载升级上报的限流走账号限流路径，不消耗回收、不删除云端副本", async () => {
+  const signal = new AbortController().signal;
+  const f = await fixture(1, [twoChunks]); f.state.limit = 10n ** 12n;
+  try {
+    await f.engine.step(signal);
+    const limited = new Engine(f.store, f.secrets, new Drive(f.api, "account"), localFiles(), () => {},
+      async () => new Response(null, { status: 429, headers: { "retry-after": "61" } }), async () => {});
+    await limited.step(signal);
+    const file = f.store.files("account")[0]!;
+    expect(f.store.rateLimited("account")).toBe(true); expect(file.state).toBe("retry_wait"); expect(file.lastError).toBe("rate_limited");
+    expect(await limited.step(signal)).toBe(false); expect(f.state.deleted).toHaveLength(0);
+  } finally { await f.close(); }
+}, 60000);
+

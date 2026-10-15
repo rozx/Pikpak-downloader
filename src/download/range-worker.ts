@@ -65,7 +65,8 @@ export async function receiveRange(request: RangeRequest): Promise<RangeOutcome>
       chunk.hash.update(part.value); chunk.received += BigInt(part.value.byteLength);
       request.onBytes?.(part.value.byteLength);
     }
-  } finally { clearTimeout(timer); await reader.cancel().catch(() => {}); }
+  // 不等待取消完成：响应体的取消可能要等一次挂起的读取结束，停止连接不应受它拖累。
+  } finally { clearTimeout(timer); reader.cancel().catch(() => {}); }
   if (chunk.received !== chunkLength(chunk)) throw new DownloadError("truncated_content");
   return { kind: "complete" };
 }

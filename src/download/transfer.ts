@@ -8,7 +8,7 @@ import type { FileWorkspace } from "./workspace";
 import { retryAfter } from "../pikpak/protocol";
 import { CHUNK_SIZE } from "../state/ranges";
 import { UrlLease } from "./lease";
-import { downloadSegmented } from "./segmented";
+import { downloadSegmented, SequentialFallback } from "./segmented";
 import { DownloadError } from "./download-error";
 export { DownloadError } from "./download-error";
 import type { DownloadTransport } from "./range-worker";
@@ -41,7 +41,8 @@ export async function remainingBytes(store: Store, accountId: string, file: File
   } finally { await local.close(); }
 }
 
-export type DownloadOptions = { connections?: number; now?: () => number; headerTimeoutMs?: number; stallTimeoutMs?: number };
+export type DownloadOptions = { connections?: number; now?: () => number; headerTimeoutMs?: number; stallTimeoutMs?: number;
+  startConnections?: number; onConcurrency?: (current: number) => void };
 
 // 连接数大于 1、文件超过一个分块且没有持久化为顺序模式时走分段路径（add-parallel-segment-download），否则走单连接顺序路径。
 // 两条路径共用最后的版本核对、读回校验与发布。
@@ -62,7 +63,8 @@ export async function download(store: Store, accountId: string, file: FileRecord
     await local.sync(); store.checkpoint(accountId, file.id, offset, hasher.prefixDigest()); checkpoint = offset;
   };
   // 单连接顺序路径：每段重新核对版本与下载地址，只有一个在途下载连接。
-  const sequentialDownload = async (): Promise<{ gcid: string; sha256: string }> => {
+  // restarts：已用掉的 Range 重启次数；从分段路径回退时已用掉 1 次，再次出现 Range 异常直接报 range_mismatch。
+  const sequentialDownload = async (restarts = 0): Promise<{ gcid: string; sha256: string }> => {
     sequential = true;
     const delivery = store.delivery(accountId, file.id)!;
     const info = await local.info();
@@ -74,7 +76,7 @@ export async function download(store: Store, accountId: string, file: FileRecord
     await local.truncate(offset);
     if (store.file(accountId, file.id).state !== "downloading") store.transition(accountId, file.id, "downloading");
     await save();
-    let addressRetries = 0, rangeRestarts = 0;
+    let addressRetries = 0, rangeRestarts = restarts;
     while (offset < file.size) {
       if (signal.aborted) throw signal.reason ?? Error("interrupted");
       remote = await check();
@@ -129,12 +131,20 @@ export async function download(store: Store, accountId: string, file: FileRecord
   try {
     const connections = options.connections ?? 1;
     const parallel = connections > 1 && file.size > CHUNK_SIZE && store.delivery(accountId, file.id)!.ranges?.mode !== "sequential";
-    const digest = parallel
-      ? await downloadSegmented({ store, accountId, file, local, connections, http, signal, progress, lease: new UrlLease(check, options.now),
-        ...(options.now ? { now: options.now } : {}), ...(options.headerTimeoutMs === undefined ? {} : { headerTimeoutMs: options.headerTimeoutMs }),
-        ...(options.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: options.stallTimeoutMs }) })
-      : await sequentialDownload();
-    if (parallel) await check();
+    let digest: { gcid: string; sha256: string };
+    if (parallel) {
+      try {
+        digest = await downloadSegmented({ store, accountId, file, local, connections, http, signal, progress, lease: new UrlLease(check, options.now),
+          ...(options.now ? { now: options.now } : {}), ...(options.headerTimeoutMs === undefined ? {} : { headerTimeoutMs: options.headerTimeoutMs }),
+          ...(options.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: options.stallTimeoutMs }),
+          ...(options.startConnections === undefined ? {} : { startConnections: options.startConnections }),
+          ...(options.onConcurrency ? { onConcurrency: options.onConcurrency } : {}) });
+        await check();
+      } catch (error) {
+        if (!(error instanceof SequentialFallback)) throw error;
+        digest = await sequentialDownload(1);
+      }
+    } else digest = await sequentialDownload();
     if (digest.gcid !== file.gcid) throw new DownloadError("integrity_mismatch");
     store.transition(accountId, file.id, "verifying");
     const readBack = await hashFile(local, file.size, signal);

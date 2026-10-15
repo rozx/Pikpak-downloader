@@ -9,7 +9,7 @@ import { rejection } from "./fixtures/rejection";
 
 const size = CHUNK_SIZE + 4096n;
 const content = new Uint8Array(Number(size)).map((_, index) => (index * 31 + 7) % 251);
-const lease = { generation: 1, url: "https://cdn.mypikpak.net/signed" };
+const lease = { generation: 1, url: "https://cdn.mypikpak.net/signed", forced: false };
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 type Seen = { range: string | null; auth: boolean; encoding: string | null; redirect: RequestRedirect | undefined };
 

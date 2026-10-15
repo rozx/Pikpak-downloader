@@ -495,6 +495,8 @@ export class Store {
         const next = unknown || ["saving", "publishing", "reconciling"].includes(file.state) ? "reconciling"
           : file.cancelled || ["failed", "needs_attention", "waiting_space", "retry_wait"].includes(file.state) ? "ready" : file.state;
         this.run("UPDATE files SET cancelled=0,state=?,retries=0,retry_at=NULL,last_error=NULL WHERE id=?", next, file.id);
+        // 显式重试允许重新尝试并行下载（服务端行为可能已经变化）；自动重试保留顺序模式标记。
+        if (this.delivery(accountId, file.id)?.ranges?.mode === "sequential") this.run("UPDATE deliveries SET ranges_json=NULL WHERE file_id=?", file.id);
       }
     });
   }

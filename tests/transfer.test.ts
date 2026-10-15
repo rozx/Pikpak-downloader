@@ -193,3 +193,44 @@ test.if(nativeFiles)("本地空间预估不截断前缀之后的分块数据，�
   } finally { await f.close(); }
 }, 60000);
 
+test.if(nativeFiles)("服务端不支持 Range：探测收到 200 后改走顺序路径完成，并记住顺序模式", async () => {
+  const f = await fixture(segmentedContent(19));
+  try {
+    const ranges: string[] = [];
+    const http: DownloadTransport = async (_, init) => { ranges.push(new Headers(init.headers).get("range")!); return new Response(f.content, { status: 200 }); };
+    await download(f.store, "account", f.file, f.copy, f.workspace, f.metadata, new AbortController().signal, undefined, http, { connections: 4, now: fastClock });
+    expect(f.store.file("account", f.file.id).state).toBe("completed");
+    expect(await readFile(f.store.delivery("account", f.file.id)!.targetPath)).toEqual(f.content);
+    expect(f.store.delivery("account", f.file.id)?.ranges?.mode).toBe("sequential");
+    expect(ranges.every(range => range.startsWith("bytes=0-"))).toBe(true);
+  } finally { await f.close(); }
+}, 60000);
+
+test.if(nativeFiles)("已有进度时 Range 异常：第一次以顺序模式从头重下，顺序路径再次异常报 range_mismatch", async () => {
+  const S = Number(CHUNK_SIZE);
+  const recovered = await fixture(segmentedContent(23));
+  try {
+    let bad = true; const transport = rangeTransport(recovered.content);
+    // 分段路径中第 2 块的响应范围错误一次；之后顺序路径的请求都正常。
+    const http: DownloadTransport = async (url, init) => {
+      const start = Number(/^bytes=(\d+)-/.exec(new Headers(init.headers).get("range")!)![1]);
+      if (start === S && bad) { bad = false; return new Response(recovered.content.subarray(0, 10), { status: 206, headers: { "content-range": `bytes 0-9/${recovered.content.length}` } }); }
+      return transport(url, init);
+    };
+    await download(recovered.store, "account", recovered.file, recovered.copy, recovered.workspace, recovered.metadata, new AbortController().signal, undefined, http, { connections: 4, now: fastClock });
+    expect(recovered.store.file("account", recovered.file.id).state).toBe("completed");
+    expect(await readFile(recovered.store.delivery("account", recovered.file.id)!.targetPath)).toEqual(recovered.content);
+  } finally { await recovered.close(); }
+  const broken = await fixture(segmentedContent(29));
+  try {
+    const transport = rangeTransport(broken.content);
+    const http: DownloadTransport = async (url, init) => {
+      const start = Number(/^bytes=(\d+)-/.exec(new Headers(init.headers).get("range")!)![1]);
+      return start === S ? new Response(broken.content.subarray(0, 10), { status: 206, headers: { "content-range": `bytes 0-9/${broken.content.length}` } }) : transport(url, init);
+    };
+    const error = await rejection(download(broken.store, "account", broken.file, broken.copy, broken.workspace, broken.metadata, new AbortController().signal, undefined, http, { connections: 4, now: fastClock }));
+    expect((error as { code?: string }).code).toBe("range_mismatch");
+    expect(broken.store.delivery("account", broken.file.id)?.ranges?.mode).toBe("sequential");
+  } finally { await broken.close(); }
+}, 60000);
+

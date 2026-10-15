@@ -84,10 +84,12 @@ export class ConnectionGate {
   private lastStart = -Infinity;
   private cooldownUntil = 0;
   current: number;
-  constructor(readonly target: number, private readonly now: () => number = Date.now) {
+  // initial：从上一个文件降低后的并发开始（同一账号在本次运行内记住），不超过 target。
+  constructor(readonly target: number, private readonly now: () => number = Date.now, initial = target) {
     if (!Number.isInteger(target) || target < 1) throw Error("invalid-connections");
-    this.current = target;
+    this.current = Math.max(1, Math.min(target, Math.floor(initial)));
   }
+  cooling(): boolean { return this.now() < this.cooldownUntil; }
   confirmProbe(): void { this.probed = true; }
   // 冷却期内不发起新请求（限流处理，见决策 7）。
   coolDown(until: number): void { this.cooldownUntil = Math.max(this.cooldownUntil, until); }

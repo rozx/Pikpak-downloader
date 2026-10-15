@@ -11,6 +11,7 @@ import { FileWorkspace } from "../download/workspace";
 import { download, DownloadError, remainingBytes, type DownloadTransport } from "../download/transfer";
 import { publishVerified, reconcilePublication } from "../download/publish";
 import { originalLink, secureDownloadUrl } from "../download/original-link";
+import { configuredConnections } from "../download/connections";
 
 export type RuntimeEvent = { type: string; id?: string; reason?: string; count?: number; bytes?: bigint; size?: bigint };
 export class Engine {
@@ -19,6 +20,8 @@ export class Engine {
   private blocked = false;
   private lastProgress = 0;
   private preferFile = false;
+  // 分段下载因限流降低后的并发，按账号在本次运行内记住，下一个文件从这个值开始（不持久化）。
+  private readonly concurrency = new Map<string, number>();
   private readonly listeners = new Set<(event: RuntimeEvent) => void>();
   constructor(private readonly store: Store, private readonly secrets: SecretStore, private readonly drive: Drive,
     private readonly filesystem: LocalFileSystem, private readonly report: (event: RuntimeEvent) => void = () => {},
@@ -178,9 +181,11 @@ export class Engine {
       if (file.cancelled || this.store.share(account, file.shareId).cancelled) return true;
       if (file.state === "saving") this.store.transition(account, file.id, "reconciling");
       this.event({ type: "downloading", id: file.id });
+      const remembered = this.concurrency.get(account);
       await download(this.store, account, file, copy, workspace, () => this.drive.file(copy!.remoteId, signal), signal, bytes => {
         if (Date.now() - this.lastProgress >= 250) { this.lastProgress = Date.now(); this.event({ type: "progress", id: file!.id, bytes, size: file!.size }); }
-      }, this.http);
+      }, this.http, { connections: configuredConnections(this.store), ...(remembered === undefined ? {} : { startConnections: remembered }),
+        onConcurrency: current => { this.concurrency.set(account, current); } });
       this.event({ type: "completed", id: file.id }); return true;
     } catch (error) {
       if (signal.aborted) return false;

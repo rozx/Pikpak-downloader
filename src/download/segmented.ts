@@ -8,7 +8,15 @@ import { receiveRange, type DownloadTransport } from "./range-worker";
 import { DownloadError } from "./download-error";
 import type { UrlLease } from "./lease";
 
-const SAVE_EVERY = 4n * 1048576n, READ_BLOCK = 65536n, CHUNK_FAILURES = 3;
+const SAVE_EVERY = 4n * 1048576n, READ_BLOCK = 65536n;
+// 失败预算（决策 8）：同一分块连续失败 3 次，或全文件连续 6 次请求失败且期间没有分块完成。
+const CHUNK_FAILURES = 3, FILE_FAILURES = 6, RETRY_PAUSE_MS = 500;
+// 限流自适应（决策 7）：冷却时间取 Retry-After 并限制在 1–60 秒，缺省 5 秒；连续完成 16 个分块后恢复 1 个连接。
+const COOLDOWN_DEFAULT_MS = 5_000, COOLDOWN_MAX_MS = 60_000, RECOVER_AFTER = 16, FORBIDDEN_PAUSE_MS = 2_000;
+
+// Range 异常（服务端忽略范围、Content-Range 不符、内容编码或响应体超出范围）：协调器停止全部连接，
+// 持久化顺序模式并从头开始，由调用方改走顺序路径（决策 8）。
+export class SequentialFallback extends Error { constructor() { super("sequential_fallback"); } }
 
 async function readInto(local: LocalFile, start: bigint, end: bigint, sink: (bytes: Uint8Array) => void, signal?: AbortSignal): Promise<void> {
   for (let offset = start; offset < end;) {
@@ -50,6 +58,8 @@ export async function reconcileSegments(store: Store, accountId: string, file: F
 export type SegmentedDownload = {
   store: Store; accountId: string; file: FileRecord; local: LocalFile; connections: number; lease: UrlLease; http: DownloadTransport;
   signal: AbortSignal; progress: (bytes: bigint) => void; now?: () => number; headerTimeoutMs?: number; stallTimeoutMs?: number;
+  // 起始并发（同一账号上一个文件降低后的值）与并发变化通知，由 engine 在本次运行内按账号记住。
+  startConnections?: number; onConcurrency?: (current: number) => void;
 };
 
 // 有界窗口内多连接下载一个文件（决策 3–5）。返回连续前缀推进到文件末尾时的 GCID 与 SHA-256；
@@ -62,7 +72,9 @@ export async function downloadSegmented(options: SegmentedDownload): Promise<{ g
   if (store.file(accountId, file.id).state !== "downloading") store.transition(accountId, file.id, "downloading");
   options.progress(plan.received());
 
-  const gate = new ConnectionGate(options.connections, options.now);
+  const now = options.now ?? Date.now;
+  const gate = new ConnectionGate(options.connections, now, options.startConnections ?? options.connections);
+  options.onConcurrency?.(gate.current);
   const stop = new AbortController(), combined = AbortSignal.any([signal, stop.signal]);
   const active = new Set<Promise<void>>();
   let failure: unknown = null, unsaved = 0n;
@@ -95,7 +107,25 @@ export async function downloadSegmented(options: SegmentedDownload): Promise<{ g
     return saving;
   };
   const requestSave = () => { save().catch(fail); };
-  const retryable = (chunk: Chunk, error: DownloadError) => { if (++chunk.failures >= CHUNK_FAILURES) fail(error); };
+  let consecutive = 0, streak = 0;
+  const lower = (to: number) => { if (to < gate.current) { gate.current = to; streak = 0; options.onConcurrency?.(gate.current); } };
+  // 网络失败、截断、5xx：分块放回队列并保留已验证字节；超出预算时以最后一次的错误上报，由 engine 计入文件级有限重试。
+  const failed = (chunk: Chunk, error: DownloadError) => {
+    consecutive++;
+    if (++chunk.failures >= CHUNK_FAILURES || consecutive >= FILE_FAILURES) fail(error); else gate.coolDown(now() + RETRY_PAUSE_MS);
+  };
+  const completed = (chunk: Chunk) => {
+    chunk.failures = 0; consecutive = 0;
+    if (++streak >= RECOVER_AFTER && gate.current < gate.target) { gate.current++; streak = 0; options.onConcurrency?.(gate.current); }
+    requestSave();
+  };
+  // 429：已在冷却中说明是同一波限流，只放回分块；否则并发减半并冷却。已是单连接或等待超过 60 秒时按文件级限流上报。
+  const rateLimited = (retryAfterMs: number | undefined) => {
+    if (gate.cooling()) return;
+    if (gate.current === 1 || (retryAfterMs ?? 0) > COOLDOWN_MAX_MS) { fail(new DownloadError("rate_limited", retryAfterMs)); return; }
+    lower(Math.max(1, Math.floor(gate.current / 2)));
+    gate.coolDown(now() + Math.min(COOLDOWN_MAX_MS, Math.max(1_000, retryAfterMs ?? COOLDOWN_DEFAULT_MS)));
+  };
 
   const worker = async (chunk: Chunk): Promise<void> => {
     try {
@@ -106,20 +136,26 @@ export async function downloadSegmented(options: SegmentedDownload): Promise<{ g
         onAccepted: () => { gate.confirmProbe(); options.lease.succeeded(); },
         onBytes: count => { unsaved += BigInt(count); options.progress(plan.received()); if (unsaved >= SAVE_EVERY) requestSave(); } });
       plan.release(chunk);
-      if (outcome.kind === "complete") { chunk.failures = 0; requestSave(); return; }
-      if (outcome.kind === "ignored") { await outcome.response.body?.cancel().catch(() => {}); throw new DownloadError("range_mismatch"); }
-      if (outcome.kind === "mismatch") throw new DownloadError("range_mismatch");
-      if (outcome.status === 401 || outcome.status === 403) { await options.lease.invalidate(lease.generation); return; }
-      if (outcome.status === 429) throw new DownloadError("rate_limited", outcome.retryAfterMs);
+      if (outcome.kind === "complete") { completed(chunk); return; }
+      if (outcome.kind === "ignored") { await outcome.response.body?.cancel().catch(() => {}); throw new SequentialFallback(); }
+      if (outcome.kind === "mismatch") throw new SequentialFallback();
+      if (outcome.status === 401 || outcome.status === 403) {
+        // 强制刷新得到的新一代地址仍被拒绝：视为服务端限制并发连接数，并发减半，2 秒后重试。
+        if (lease.forced && gate.current > 1 && !gate.cooling()) { lower(Math.floor(gate.current / 2)); gate.coolDown(now() + FORBIDDEN_PAUSE_MS); }
+        await options.lease.invalidate(lease.generation); return;
+      }
+      if (outcome.status === 429) { rateLimited(outcome.retryAfterMs); return; }
       if (outcome.status === 402) throw new DownloadError("traffic_quota");
-      retryable(chunk, new DownloadError("network_failure"));
+      failed(chunk, new DownloadError("network_failure"));
     } catch (error) {
       plan.release(chunk);
       if (combined.aborted) return;
-      if (error instanceof DownloadError && (error.code === "network_failure" || error.code === "truncated_content")) retryable(chunk, error);
+      if (error instanceof DownloadError && error.code === "range_mismatch") fail(new SequentialFallback());
+      else if (error instanceof DownloadError && (error.code === "network_failure" || error.code === "truncated_content")) failed(chunk, error);
       else fail(error);
     }
   };
+  // 等待以短间隔轮询闸门：冷却与慢启动按注入的时钟计算，不直接按其差值睡眠。
   const pause = (ms: number) => new Promise<void>(resolve => {
     const timer = setTimeout(resolve, ms);
     combined.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
@@ -134,10 +170,10 @@ export async function downloadSegmented(options: SegmentedDownload): Promise<{ g
       }
       if (active.size === 0) {
         // 窗口内的分块都已完成但尚未并入时，保存一次推进前缀；否则等慢启动或冷却结束。
-        if (plan.head()) await save(); else await pause(Math.max(gate.waitMs(), 10));
+        if (plan.head()) await save(); else await pause(Math.min(Math.max(gate.waitMs(), 10), 100));
         continue;
       }
-      await Promise.race([...active, pause(Math.max(gate.waitMs(), 50))]);
+      await Promise.race([...active, pause(Math.min(Math.max(gate.waitMs(), 10), 100))]);
     }
   } catch (error) { fail(error); }
 
@@ -145,6 +181,12 @@ export async function downloadSegmented(options: SegmentedDownload): Promise<{ g
     // 停止全部连接，等在途写入结束后尽力保存；sync 失败时沿用上次已提交的检查点。
     stop.abort(); await Promise.allSettled([...active]);
     await (saving as Promise<void> | null)?.catch(() => {});
+    if (!signal.aborted && failure instanceof SequentialFallback) {
+      // 持久化顺序模式，清空区间并截断到 0，之后由顺序路径从头下载；显式 retry 才会清除该标记。
+      await local.truncate(0n); await local.sync();
+      store.checkpoint(accountId, file.id, 0n, new ContentHasher(file.size).prefixDigest(), { mode: "sequential", chunk: CHUNK_SIZE, ranges: [] });
+      throw failure;
+    }
     if (store.file(accountId, file.id).state === "downloading") await saveOnce().catch(() => {});
     throw signal.aborted ? signal.reason ?? Error("interrupted") : failure;
   }

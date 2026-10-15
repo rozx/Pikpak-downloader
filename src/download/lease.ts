@@ -4,7 +4,8 @@ import { DownloadError } from "./download-error";
 
 // 共享地址租约（add-parallel-segment-download 决策 6）：所有连接共用同一份已核对版本的地址。
 // 签名地址只保存在内存里，不写入任务库、事件或日志。
-export type Lease = { readonly generation: number; readonly url: string };
+// forced：这一代是因 401/403 强制刷新得到的；它的请求仍被拒绝时，协调器视为服务端在限制并发连接数。
+export type Lease = { readonly generation: number; readonly url: string; readonly forced: boolean };
 
 export class UrlLease {
   private current: (Lease & { at: number }) | null = null;
@@ -25,18 +26,18 @@ export class UrlLease {
     if (this.refreshing) return this.refreshing;
     if (this.current && this.current.generation !== generation) return this.current;
     if (++this.forced > this.maxForced) throw new DownloadError("url_refresh_exhausted");
-    return this.refresh();
+    return this.refresh(true);
   }
   // 任意请求得到正确的部分内容后，刷新预算清零。
   succeeded(): void { this.forced = 0; }
 
-  private refresh(): Promise<Lease> {
+  private refresh(forced = false): Promise<Lease> {
     const generation = (this.current?.generation ?? 0) + 1;
     this.refreshing = (async () => {
       const remote = await this.check();
       const link = originalLink(remote.raw), endpoint = link && secureDownloadUrl(link.url);
       if (!endpoint) throw new DownloadError("unsupported_download_url");
-      this.current = { generation, url: endpoint.url.href, at: this.now() };
+      this.current = { generation, url: endpoint.url.href, forced, at: this.now() };
       return this.current;
     })().finally(() => { this.refreshing = null; });
     return this.refreshing;

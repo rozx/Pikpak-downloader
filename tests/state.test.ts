@@ -288,3 +288,13 @@ test("库中区间损坏时整体视为空，前缀保留；界面断点显示�
   db.close(); f.reopen();
 });
 
+test("显式重试清除顺序模式标记，自动重试保留", () => {
+  const f = fixture(); downloading(f);
+  f.store.checkpoint("account-a", f.file.id, 0n, "a".repeat(64), { mode: "sequential", chunk: CHUNK_SIZE, ranges: [] });
+  f.store.transientFailure("account-a", f.file.id, "range_mismatch");
+  expect(f.store.delivery("account-a", f.file.id)?.ranges?.mode).toBe("sequential");
+  f.store.retry("account-a", f.file.id);
+  expect(f.store.delivery("account-a", f.file.id)?.ranges).toBe(null);
+  expect(f.store.delivery("account-a", f.file.id)?.prefixSha256).toBe("a".repeat(64));
+});
+
