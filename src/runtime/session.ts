@@ -128,10 +128,10 @@ export class RuntimeSession {
       let result: CommandResult = { ok: true, ids: [], issues: [] };
       if (command.kind === "retry") this.store.retry(account, command.id);
       else if (command.kind === "cancel") {
-        // 只停止目标文件（或该分享的文件），其他在途文件继续。
-        await this.engine.stopActive?.(target => target.fileId === command.id || target.shareId === command.id);
+        // 先写取消标记，调度不再选这些文件；再停下下载池中的目标（或该分享的文件），其他在途文件继续。
         this.store.cancel(account, command.id); this.store.recheckCancelledPause(account);
-      } else if (command.kind === "pauseQueue") { await this.engine.stopActive?.(); this.store.setConfig("queue_paused", "1"); }
+        await this.engine.stopActive?.(target => target.fileId === command.id || target.shareId === command.id);
+      } else if (command.kind === "pauseQueue") { this.store.setConfig("queue_paused", "1"); await this.engine.stopActive?.(); }
       else if (command.kind === "resumeQueue") this.store.setConfig("queue_paused", "0");
       else if (command.kind === "setOutputRoot") {
         const root = await writableDirectory(command.path);
