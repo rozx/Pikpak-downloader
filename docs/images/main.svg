@@ -171,7 +171,7 @@
 <rect x="26.4" y="136.8" width="924.3" height="18" fill="#c8cee0" shape-rendering="crispEdges"/>
 <rect x="505.2" y="136.8" width="75.6" height="18" fill="#5a8df0" shape-rendering="crispEdges"/>
 <text x="60" y="150.12" fill="#2a2d3a" font-weight="700">&gt;</text>
-<text x="76.8" y="150.12" fill="#5a8df0">⠙</text>
+<text x="76.8" y="150.12" fill="#5a8df0">⠋</text>
 <text x="102" y="150.12" fill="#5a8df0">☁</text>
 <text x="118.8 127.2 135.6 144 152.4 160.8" y="150.12" fill="#2a2d3a" font-weight="700">Sintel</text>
 <text x="177.6 186 194.4 202.8 211.2 219.6 228 236.4 244.8 253.2" y="150.12" fill="#2a2d3a" font-weight="700">(2010).mkv</text>
@@ -190,7 +190,7 @@
 <text x="841.2 849.6 858 866.4" y="150.12" fill="#5a8df0">MB/s</text>
 <text x="891.6 900 916.8 925.2 933.6" y="150.12" fill="#2a2d3a">1分11秒</text>
 <rect x="505.2" y="154.8" width="25.2" height="18" fill="#5ccfe6" shape-rendering="crispEdges"/>
-<text x="76.8" y="168.12" fill="#5ccfe6">⠙</text>
+<text x="76.8" y="168.12" fill="#5ccfe6">⠋</text>
 <text x="102" y="168.12" fill="#82aaff">☁</text>
 <text x="118.8 127.2 135.6 144 152.4" y="168.12" fill="#c8cee0">Tears</text>
 <text x="169.2 177.6" y="168.12" fill="#c8cee0">of</text>
@@ -216,7 +216,7 @@
 <text x="807.6 816 824.4" y="168.12" fill="#5ccfe6">5.1</text>
 <text x="841.2 849.6 858 866.4" y="168.12" fill="#5ccfe6">MB/s</text>
 <text x="891.6 900 916.8 925.2 933.6" y="168.12" fill="#6b7089">6分21秒</text>
-<text x="76.8" y="186.12" fill="#5a8df0">⠙</text>
+<text x="76.8" y="186.12" fill="#5a8df0">⠋</text>
 <text x="118.8 127.2 135.6 144 152.4 160.8" y="186.12" fill="#c8cee0">Spring</text>
 <text x="177.6 186 194.4 202.8 211.2 219.6 228 236.4 244.8 253.2" y="186.12" fill="#c8cee0">(2019).mkv</text>
 <text x="429.6 438 446.4" y="186.12" fill="#6b7089">1.7</text>

@@ -178,14 +178,14 @@ xattr -d com.apple.quarantine ./pikpak-downloader-darwin-arm64
 .\pikpak-downloader-windows-x64.exe login                       # 浏览器登录，或核对已有会话
 .\pikpak-downloader-windows-x64.exe watch --output D:\Downloads  # 纯文本的前台监听
 .\pikpak-downloader-windows-x64.exe status                      # 只读查看任务状态，运行中也可以用
-.\pikpak-downloader-windows-x64.exe retry <任务ID>
-.\pikpak-downloader-windows-x64.exe cancel <任务ID>
+.\pikpak-downloader-windows-x64.exe retry f_1a2b3c4d             # 重试一个文件任务
+.\pikpak-downloader-windows-x64.exe cancel s_1a2b3c4d            # 取消一个分享任务
 .\pikpak-downloader-windows-x64.exe config --connections 6
 .\pikpak-downloader-windows-x64.exe config --files 3
 .\pikpak-downloader-windows-x64.exe logout                      # 清除令牌，保留任务
 ```
 
-`watch` 的进度每跨过 10% 或满 30 秒输出一行。除 `status` 外，写操作需要先停止正在运行的界面或 `watch`。完整列表见 `--help`。
+示例中的 `f_1a2b3c4d`、`s_1a2b3c4d` 要换成 `status` 列出的文件任务 ID（以 `f_` 开头）或分享任务 ID（以 `s_` 开头）。`watch` 的进度每跨过 10% 或满 30 秒输出一行。除 `status` 外，写操作需要先停止正在运行的界面或 `watch`。完整列表见 `--help`。
 
 ### 平台说明
 

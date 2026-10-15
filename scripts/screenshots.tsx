@@ -14,6 +14,8 @@ const { TuiApp } = await import("../src/tui/app");
 const { StartupApp } = await import("../src/tui/startup");
 const { createTheme } = await import("../src/tui/theme");
 const { LOGO } = await import("../src/tui/brand");
+const { SPINNER } = await import("../src/tui/parts");
+const SPINNER_FRAMES = new RegExp(`[${SPINNER}]`, "g");
 const { FakeController, file, keys, share } = await import("../tests/fixtures/tui");
 type TuiSnapshot = import("../src/tui/controller").TuiSnapshot;
 type StartupDeps = import("../src/tui/startup").StartupDeps;
@@ -68,8 +70,11 @@ class ShowcaseController extends FakeController {
     this.release = { ok: true, copies: 1, bytes: 885n * MB, unfinished: 0, removed: 1 };
   }
   override targetPath = (fileId: string): string | null => fileId === "f_ocean" ? `${MEDIA}\\自然纪录片 4K\\第 01 集 · 海洋的深处.mp4` : null;
+  // 粘贴框显示的是遮蔽后的文本，解析不出分享；预览结果按一段完整的分享文本给出。
+  override preview = () => ({ shares: 1, paired: 1, issues: [] });
 }
-const PASTE = "Blender 开源电影合集\n链接：https://mypikpak.com/s/synthetic-demo\n提取码：demo";
+// 截图里不出现可解析的分享链接与提取码，即使是虚构的（AGENTS.md）：链接与提取码用圆点遮蔽。
+const PASTE = "Blender 开源电影合集\n链接：https://mypikpak.com/s/••••••••••••\n提取码：••••";
 
 // ---------- 渲染为终端帧 ----------
 
@@ -87,7 +92,8 @@ async function capture(tree: (size: Size) => ReactNode, size: Size, inputs: stri
   const app = render(tree(size), { stdout: stdout as never, stdin: stdin as never, debug: true, exitOnCtrlC: false, patchConsole: false });
   await Bun.sleep(60);
   for (const input of inputs) { stdin.write(input); await Bun.sleep(60); }
-  const frame = stdout.frame;
+  // 卸载会写出空帧，先取下当前帧。动态图标的帧序号取决于计时器与机器负载：统一换成第一帧，重新生成时截图不会无故变化。
+  const frame = stdout.frame.replace(SPINNER_FRAMES, SPINNER[0]!);
   app.unmount();
   return frame;
 }
