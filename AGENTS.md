@@ -17,6 +17,7 @@ bun test tests/tui-screens.test.tsx -t "全部释放"   # 按测试名过滤
 bun run dev                                    # 从源码运行并监视改动，保存后自动重启；无参数且在交互终端中时进入全屏界面
 bun run start --help                           # 从源码运行一次 CLI（src/cli.ts），不监视改动
 bun scripts/preview-tui.tsx                    # 用模拟数据预览全屏界面，不读写任务库
+bun scripts/screenshots.tsx                    # 用虚构数据重新生成 README 用的 docs/images/*.svg；界面改动后运行
 bun run build bun-windows-x64                  # 单文件产物输出到 dist/；目标为 bun-{darwin,windows,linux}-{arm64,x64}，默认取当前平台
 ```
 

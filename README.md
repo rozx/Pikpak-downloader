@@ -215,7 +215,7 @@ xattr -d com.apple.quarantine ./pikpak-downloader-darwin-arm64
 - [验收状态](docs/acceptance.md)
 
 > [!NOTE]
-> 项目仍处于 0.x 阶段。真实多页嵌套分享与完整故障场景等发布验收仍在进行，详见[验收状态](docs/acceptance.md)。遇到问题欢迎提交 [Issue](https://github.com/rozx/Pikpack-downloader/issues)。
+> 项目处于 0.x 阶段。实际使用验证集中在 Windows x64；macOS、Windows arm64 与 Linux 桌面尚未完整实机演练，详见[验收状态](docs/acceptance.md)。遇到问题欢迎提交 [Issue](https://github.com/rozx/Pikpack-downloader/issues)。
 
 ## 开发
 
