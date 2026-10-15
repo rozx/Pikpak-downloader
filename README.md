@@ -212,10 +212,9 @@ xattr -d com.apple.quarantine ./pikpak-dl-cli-darwin-arm64
 - [下载、校验与恢复](docs/downloads.md)
 - [云端空间与回收](docs/cloud-space.md)
 - [本机状态与恢复](docs/state-and-recovery.md)
-- [验收状态](docs/acceptance.md)
 
 > [!NOTE]
-> 项目处于 0.x 阶段。实际使用验证集中在 Windows x64；macOS、Windows arm64 与 Linux 桌面尚未完整实机演练，详见[验收状态](docs/acceptance.md)。遇到问题欢迎提交 [Issue](https://github.com/rozx/pikpak-dl-cli/issues)。
+> 项目处于 0.x 阶段。实际使用验证集中在 Windows x64；macOS、Windows arm64 与 Linux 桌面尚未完整实机演练，已知问题见各版本的 [Release 说明](https://github.com/rozx/pikpak-dl-cli/releases)。遇到问题欢迎提交 [Issue](https://github.com/rozx/pikpak-dl-cli/issues)。
 
 ## 开发
 
