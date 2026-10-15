@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { version } from "../package.json";
 import { acquireQueueLock } from "../src/state/lock";
 import { Store } from "../src/state/store";
 
@@ -34,7 +35,7 @@ test("干净状态缺登录时 watch 给出指引，配置与版本命令可独�
   try {
     const watch = await run("watch", "--output", root); expect(watch.code).toBe(1); expect(watch.error).toContain("login");
     expect((await run("config", "--output", root)).code).toBe(0);
-    expect((await run("--version")).output.trim()).toBe("0.1.0");
+    expect((await run("--version")).output.trim()).toBe(version);
     expect((await run("status")).output).toContain("未设置活动账号");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
