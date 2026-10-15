@@ -1,0 +1,112 @@
+{
+  "at": "2026-10-15T04:26:29.331Z",
+  "platform": "win32/x64",
+  "results": [
+    {
+      "writers": 4,
+      "windowMiB": 64,
+      "totalMiB": 256,
+      "seconds": 36.8,
+      "writeMiBps": 6.96,
+      "readBackMiBps": 6.96,
+      "targetMiBps": 0.96,
+      "ratioToTarget": 7.28,
+      "maxAheadMiB": 64,
+      "maxMs": {
+        "write": 1451,
+        "read": 605,
+        "sync": 989,
+        "truncate": 3
+      },
+      "calls": {
+        "write": 4096,
+        "read": 4096,
+        "sync": 36,
+        "truncate": 1
+      },
+      "error": null,
+      "vdlJump": {
+        "writeMs": 408,
+        "syncMs": 179
+      }
+    },
+    {
+      "writers": 8,
+      "windowMiB": 64,
+      "totalMiB": 256,
+      "seconds": 38.8,
+      "writeMiBps": 6.6,
+      "readBackMiBps": 6.6,
+      "targetMiBps": 1.91,
+      "ratioToTarget": 3.45,
+      "maxAheadMiB": 64,
+      "maxMs": {
+        "write": 939,
+        "read": 9,
+        "sync": 393,
+        "truncate": 4
+      },
+      "calls": {
+        "write": 4096,
+        "read": 4096,
+        "sync": 68,
+        "truncate": 1
+      },
+      "error": null,
+      "vdlJump": null
+    },
+    {
+      "writers": 4,
+      "windowMiB": 128,
+      "totalMiB": 512,
+      "seconds": 59.7,
+      "writeMiBps": 8.58,
+      "readBackMiBps": 8.58,
+      "targetMiBps": 0.96,
+      "ratioToTarget": 8.96,
+      "maxAheadMiB": 120,
+      "maxMs": {
+        "write": 535,
+        "read": 470,
+        "sync": 284,
+        "truncate": 4
+      },
+      "calls": {
+        "write": 8192,
+        "read": 8192,
+        "sync": 9,
+        "truncate": 1
+      },
+      "error": null,
+      "vdlJump": {
+        "writeMs": 855,
+        "syncMs": 97
+      }
+    },
+    {
+      "writers": 8,
+      "windowMiB": 128,
+      "totalMiB": 512,
+      "seconds": 73,
+      "writeMiBps": 7.01,
+      "readBackMiBps": 7.01,
+      "targetMiBps": 1.91,
+      "ratioToTarget": 3.66,
+      "maxAheadMiB": 128,
+      "maxMs": {
+        "write": 2005,
+        "read": 1161,
+        "sync": 1772,
+        "truncate": 5
+      },
+      "calls": {
+        "write": 8192,
+        "read": 8192,
+        "sync": 68,
+        "truncate": 1
+      },
+      "error": null,
+      "vdlJump": null
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 ## Context
 
-动机见 [proposal.md](proposal.md)，可观察行为见 [share-downloads 规格增量](specs/share-downloads/spec.md)。本文以 `add-clipboard-download-workflow` 已实现的代码为基线；行号对应提交 `63597e8`。
+动机见 [proposal.md](proposal.md)，可观察行为见 [share-downloads 规格增量](specs/share-downloads/spec.md)。本文以 `add-clipboard-download-workflow` 已实现的代码为基线：`src/download/`、`src/platform/` 的行号对应提交 `63597e8`，这些文件截至 `3111468` 未改动；`src/runtime/engine.ts` 已随 `add-interactive-tui` 改动，行号对应 `3111468`。
 
 ### 实测数据
 
@@ -12,7 +12,7 @@
 
 | 机制 | 现状（代码位置） | 多连接下的问题 | 本设计的改法 |
 | --- | --- | --- | --- |
-| 只有一个在途下载连接 | [transfer.ts:68-117](../../../src/download/transfer.ts) 的 `while (offset < file.size)` 每轮先 `check()` 重新取元数据和地址，再请求 `bytes=offset-(offset+8 MiB-1)`，读完一段才请求下一段；[engine.ts:172](../../../src/runtime/engine.ts) 每次只调度一个文件；原设计 §3 规定同一时刻最多一个转存/下载流水项，§6 规定“首版使用单连接顺序下载” | 每段都调用 `check()`，元数据请求数会随连接数成倍增加；`addressRetries`、`rangeRestarts` 都是单连接局部变量，多个连接会各自刷新地址、各自计数；429 会直接抛出并消耗文件级重试预算 | 仍然一次只下载一个文件（§3 不变），文件内部由调度器在有界窗口里分配 8 MiB 分块（决策 3）；地址与版本核对改为共享租约，最长 30 秒刷新一次，遇到 401/403 时单飞刷新（决策 6）；限流先在文件内部降并发（决策 7） |
+| 只有一个在途下载连接 | [transfer.ts:68-117](../../../src/download/transfer.ts) 的 `while (offset < file.size)` 每轮先 `check()` 重新取元数据和地址，再请求 `bytes=offset-(offset+8 MiB-1)`，读完一段才请求下一段；[engine.ts:181](../../../src/runtime/engine.ts) 每次只调度一个文件；原设计 §3 规定同一时刻最多一个转存/下载流水项，§6 规定“首版使用单连接顺序下载” | 每段都调用 `check()`，元数据请求数会随连接数成倍增加；`addressRetries`、`rangeRestarts` 都是单连接局部变量，多个连接会各自刷新地址、各自计数；429 会直接抛出并消耗文件级重试预算 | 仍然一次只下载一个文件（§3 不变），文件内部由调度器在有界窗口里分配 8 MiB 分块（决策 3）；地址与版本核对改为共享租约，最长 30 秒刷新一次，遇到 401/403 时单飞刷新（决策 6）；限流先在文件内部降并发（决策 7） |
 | 断点检查点：顺序前缀 SHA-256 | `deliveries.checkpoint` 加 `prefix_sha256`，表示 `[0, checkpoint)` 的 SHA-256；[transfer.ts:54-56](../../../src/download/transfer.ts) 每新增 1 MiB 就先 `sync()` 再写库；恢复时 [transfer.ts:58-65](../../../src/download/transfer.ts) 用 `prefix()` 读回并比对，然后截断到检查点；`remainingBytes()` 在 [transfer.ts:31](../../../src/download/transfer.ts) 也会截断检查点之后的数据 | 并发写入时，已写数据不再是一个连续前缀，只用一个偏移量无法描述；截断会删掉窗口内已经完成的分块；SHA-256 不能拼接，无法由“前缀摘要 + 分块摘要”直接算出新前缀摘要 | 保留连续前缀的原有含义，另加最多 16 个分块区间，每个区间各自记录 SHA-256（决策 4）；前缀之后紧接的分块完成后，先读回再并入前缀（决策 5）；恢复时分别核对前缀和每个区间，只丢弃对不上的区间，并且不再截断前缀之后的数据（决策 4、9） |
 | 流式 GCID 校验 | [transfer.ts:111](../../../src/download/transfer.ts) 收到的网络字节按顺序送入 `ContentHasher`（[gcid.ts](../../../src/download/gcid.ts)，同时计算 GCID 与 SHA-256）；下载结束后先比对 GCID，再通过 `hashFile` 读回，比对 GCID 与 SHA-256（[transfer.ts:119-123](../../../src/download/transfer.ts)） | GCID 是“各块 SHA-1 依次拼接后再做 SHA-1”，SHA-256 是整条流的摘要，两者都要求按顺序输入；乱序到达的分块不能直接送进同一个哈希器 | 每个连接只对自己负责的分块计算 SHA-256；顺序哈希器只吃“已经读回、并与该分块接收时摘要一致”的磁盘数据，前缀推到文件末尾时得到 GCID 与 SHA-256；完成后的读回校验和发布流程不变（决策 5） |
 
@@ -80,7 +80,7 @@ P1/P2 的结果记录到本文件的 Evidence 小节。没有证据之前，不�
 - **窗口 W = 2 × C 个分块**：默认 8 个（64 MiB），上限 16 个（128 MiB）。设 `base = ⌊L / S⌋`（L 为连续已验证前缀的长度），连接只领取序号在 `[base, base + W)` 之内、尚未完成也不在途的分块，从小到大领取。W 比 C 多出的部分作为余量，一个慢分块不会立刻挡住其他连接。
 - **启动探测**：先只用一个连接请求连续前缀所在的区间。响应头通过 206 和精确 `Content-Range` 校验之后，再每秒最多新增 1 个连接，直到当前并发上限。这样可以避免一开始就同时打出多个请求。
 - **使用顺序路径**的条件：文件大小不超过 S（包括零字节）、C = 1，或该文件已持久化为顺序模式（决策 8）。顺序路径就是现有代码，只多一处改动：第一次保存检查点时清空 `ranges_json`。
-- 配置入口：`config --connections <1-8>`，`status` 中显示当前值。新值从下一个文件开始生效。TUI 设置页以后可以复用这个键。
+- 配置入口：`config --connections <1-8>`，`status` 中显示当前值。新值从下一个文件开始生效。`Store` 的 `ConfigKey` 联合类型（现为 `active_account`、`output_root`、`queue_paused`、`clipboard_watch`）增加 `download_connections`。TUI 设置页以后可以复用这个键。
 
 ### 4. 检查点格式与持久化顺序
 
@@ -177,9 +177,43 @@ P1/P2 的结果记录到本文件的 Evidence 小节。没有证据之前，不�
 
 ### 10. 与 `add-interactive-tui` 的边界
 
-- `download()` 的进度回调仍是 `(bytes: bigint) => void`，值为 `L + Σ 区间已接收字节`，已经包含尚未保存的字节。丢弃区间或 GCID 不符重置时，这个值可能减小；现在 GCID 不符重置时也会归零，TUI 计算速度时需要能处理数值减小。
-- TUI 详情页的“断点进度”应显示已持久化的字节数（`L + Σ 已保存区间字节`），由 Store 提供辅助查询，不直接读 `checkpoint` 列。
-- 本变更只改 `engine.ts` 中调用 `download()` 的参数，以及跨文件并发记忆；实现应排在 TUI 的执行器中断和进度事件改动合入之后。
+`add-interactive-tui` 的执行器中断与进度事件改动已在 main（截至 `3111468`），本变更直接在其上实现：
+
+- `download()` 的进度回调仍是 `(bytes: bigint) => void`，值为 `L + Σ 区间已接收字节`，已经包含尚未保存的字节。`Engine.step` 每 250 ms 至多转发一次，事件为 `{ type: "progress", id, bytes, size }`，结构不变。丢弃区间或 GCID 不符重置时，这个值可能减小；TUI 的 `SpeedMeter`（`src/tui/speed.ts`）在数值减小时清空该文件的速度窗口，已有测试覆盖。
+- TUI 主面板与详情页的断点字节来自 `Store.fileViews()` 中对 `deliveries.checkpoint` 的子查询。改为区间检查点后，这里应返回已持久化的字节数（`L + Σ 已保存区间字节`），由任务 2.2 的辅助查询提供。
+- 用户中断：`RuntimeSession`（`src/runtime/session.ts`）为每一步创建独立的中断控制器，取消当前文件或暂停队列时中断该步骤，并等待它返回后再写任务库。`download()` 收到的 `signal` 与 Ctrl+C 走同一条路径，因此决策 8 的“用户中断”处理同时覆盖 TUI 的取消和暂停。
+- 本变更只改 `engine.ts` 中调用 `download()` 的参数，以及跨文件并发记忆。
+
+## Evidence
+
+### P2 Windows 文件桥（2026-10-15）
+
+验证程序 `spikes/segment-download/p2-bridge.ts`，以 `bun build --compile` 编译为 windows-x64 独立产物，通过现有 `systemFiles()` 文件桥运行。每个场景按决策 3–5 模拟：8 MiB 分块，写入者按序号领取窗口内最小的空闲分块，每次调用写 64 KiB；每新写 4 MiB 或任一分块完成时合并保存一次，保存时先 `sync()`，再把已完成的队头分块读回、核对 SHA-256 并并入前缀。写入总量为窗口的 4 倍。另在空文件上直接写窗口末端的一块，测第一次越过 VDL 时补零整个窗口的耗时。原始结果见同目录的 `p2-results-*.json`。
+
+“合计写入”是写入字节数除以总耗时，总耗时包含同期的读回与 `sync`，即桥接同时承担写入与等量读回时的写入速率。目标下载速率按单连接 245 KiB/s × 写入者数计算，通过标准为其 4 倍。
+
+| 磁盘 | 写入者 | 窗口 | 合计写入 | 目标的倍数 | 单次调用最长（写/读/sync） | 补零整个窗口 | 会话中断 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| NVMe SSD（C:，Samsung 970） | 4 | 64 MiB | 13.4 MiB/s | 14.0 | 28 / 25 / 15 ms | 27 ms | 无 |
+| NVMe SSD | 8 | 64 MiB | 13.4 MiB/s | 7.0 | 98 / 6 / 26 ms | — | 无 |
+| NVMe SSD | 4 | 128 MiB | 12.6 MiB/s | 13.2 | 61 / 61 / 13 ms | 59 ms | 无 |
+| NVMe SSD | 8 | 128 MiB | 12.6 MiB/s | 6.6 | 59 / 58 / 38 ms | — | 无 |
+| SATA 机械硬盘（G:，ST4000DM004） | 4 | 64 MiB | 7.0 MiB/s | 7.3 | 1451 / 605 / 989 ms | 408 ms | 无 |
+| 机械硬盘 | 8 | 64 MiB | 6.6 MiB/s | **3.45** | 939 / 9 / 393 ms | — | 无 |
+| 机械硬盘 | 4 | 128 MiB | 8.6 MiB/s | 9.0 | 535 / 470 / 284 ms | 855 ms | 无 |
+| 机械硬盘 | 8 | 128 MiB | 7.0 MiB/s | **3.66** | 2005 / 1161 / 1772 ms | — | 无 |
+| 机械硬盘，窗口降到 C+1 | 8 | 72 MiB | 6.3 MiB/s | **3.28** | 2158 / 304 / 775 ms | — | 无 |
+
+判定（决策 1）：
+
+- 单次调用最长 2.2 秒，均低于 5 秒；没有出现 `native-session-closed`。NTFS 补零整个 128 MiB 窗口在 SSD 上 59 ms、机械硬盘上 855 ms，远低于桥接单次调用的 15 秒上限，补零不是风险。
+- 默认 4 个连接在 SSD 与机械硬盘上都通过（≥ 7.3 倍）。
+- 8 个连接在 SSD 上通过（≥ 6.6 倍）；在机械硬盘上只有 3.3–3.7 倍，低于 4 倍。按决策 1 把窗口降到 C+1 个分块后重测为 3.28 倍，没有改善：瓶颈是机械硬盘在两块区域间的寻道与桥接逐次调用的开销，而不是补零或窗口大小。按决策 1，“机械硬盘上 8 个连接”回到评审，在 1.3 中处理。即使如此，6.3 MiB/s 仍是 8 连接目标下载速率（1.9 MiB/s）的 3 倍以上。
+- 桥接同时读写时的合计吞吐（写 + 读）在 SSD 上约 26 MiB/s、机械硬盘上约 13–17 MiB/s，与提案中“约 21 MiB/s 写入”的估计一致。决策 9 中“读速度与写速度相当”的假设成立。
+
+### P1 真实 CDN
+
+待运行。
 
 ## Risks / Trade-offs
 

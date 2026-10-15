@@ -1,17 +1,17 @@
 # Tasks
 
-本变更必须等 P1、P2 验证（第 1 组）通过后才能进入实现。实现依赖 `add-clipboard-download-workflow` 的现有代码；涉及 `src/runtime/engine.ts` 的任务排在 `add-interactive-tui` 的执行器中断和进度事件改动合入之后。各组区分真实接口、模拟服务和实际操作系统三类验证，不用其中一种代替另一种。
+本变更必须等 P1、P2 验证（第 1 组）通过后才能进入实现。实现依赖 `add-clipboard-download-workflow` 的现有代码；`add-interactive-tui` 的执行器中断（`RuntimeSession` 每步独立中断控制器）与进度事件 `{ type, id, bytes, size }` 已在 main（截至 `3111468`），涉及 `src/runtime/engine.ts` 的任务直接在其上实现。各组区分真实接口、模拟服务和实际操作系统三类验证，不用其中一种代替另一种。
 
 ## 1. Feasibility
 
 - [ ] 1.1 P1 真实 CDN 验证：使用明确指定的测试副本（≥ 256 MiB），在同一个签名地址上用 1/2/4/8 个并发 Range 连接各运行 3 次。记录合计吞吐、每个响应的状态码与 `Content-Range`、429/403/402 次数和 `Retry-After`、多个连接能否共用同一地址，以及地址从取得到失效的时长。验收：结果按 design.md 决策 1 的标准判定，记录到 Evidence；不输出签名地址、凭据或文件名。
-- [ ] 1.2 P2 Windows 文件桥验证：用编译后的产物在 NTFS 上运行 4 和 8 个写入者，在 64 MiB 和 128 MiB 窗口内乱序写入，同时穿插读回和 `sync()`。记录合计吞吐、单次调用的最长耗时（尤其是第一次写到 VDL 之后时），以及是否出现 `native-session-closed`；条件允许时再测一块机械硬盘或 U 盘。验收：按决策 1 判定；不通过时记录 Windows 窗口的调整结果，或回到评审。
+- [x] 1.2 P2 Windows 文件桥验证：用编译后的产物在 NTFS 上运行 4 和 8 个写入者，在 64 MiB 和 128 MiB 窗口内乱序写入，同时穿插读回和 `sync()`。记录合计吞吐、单次调用的最长耗时（尤其是第一次写到 VDL 之后时），以及是否出现 `native-session-closed`；条件允许时再测一块机械硬盘或 U 盘。验收：按决策 1 判定；不通过时记录 Windows 窗口的调整结果，或回到评审。结果（2026-10-15，见 design.md Evidence）：SSD 上 4/8 连接、机械硬盘上 4 连接通过；单次调用最长 2.2 秒，补零 128 MiB 窗口不超过 0.9 秒，无会话中断；机械硬盘上 8 连接只有目标的 3.3–3.7 倍，窗口降到 C+1 后为 3.28 倍，回到 1.3 评审。
 - [ ] 1.3 汇总 P1、P2，确认或在 1–8 内调整默认连接数，确认 Windows 窗口大小。验收：P1 无增益时停止本变更并记录原因；通过后才开始第 2 组。
 
 ## 2. State and Configuration
 
 - [ ] 2.1 任务库结构升到 4：在现有迁移事务中给 `deliveries` 增加 `ranges_json`，沿用升级前备份。验收：迁移测试证明结构版本 3 的检查点仍作为连续前缀继续下载；旧程序拒绝写入版本 4；迁移失败时回滚。
-- [ ] 2.2 Store 的检查点读写：用一个事务同时写入 `checkpoint`、`prefix_sha256` 和 `ranges_json`，并校验决策 4 的不变式；读取时把格式错误或违反不变式的 `ranges_json` 视为空，但保留前缀；提供“已持久化字节数”辅助查询。验收：单元测试覆盖区间越界、重叠、超过 16 项、大小不对齐、`chunk` 不一致、超出 JS 安全整数范围的偏移，以及 `mode = "sequential"` 时区间非空。
+- [ ] 2.2 Store 的检查点读写：用一个事务同时写入 `checkpoint`、`prefix_sha256` 和 `ranges_json`，并校验决策 4 的不变式；读取时把格式错误或违反不变式的 `ranges_json` 视为空，但保留前缀；提供“已持久化字节数”辅助查询，并让 `fileViews()` 的断点字段改用它，TUI 主面板与详情页随之显示已持久化字节数。验收：单元测试覆盖区间越界、重叠、超过 16 项、大小不对齐、`chunk` 不一致、超出 JS 安全整数范围的偏移，以及 `mode = "sequential"` 时区间非空。
 - [ ] 2.3 配置键 `download_connections` 与 `config --connections <1-8>`，并在 `status` 中显示。验收：拒绝 0、负数、非整数和大于 8 的值，保留原值；未设置时取默认值 4；`watch` 占锁期间写配置仍按单实例规则拒绝。
 
 ## 3. Segmented Download Core
