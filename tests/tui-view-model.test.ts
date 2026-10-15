@@ -93,6 +93,8 @@ test("任务位置：已完成看本地文件是否仍在，未完成看断点�
   expect(fileLocation(done, true)).toEqual({ local: "missing", cloud: false });
   expect(fileLocation(partial)).toEqual({ local: "partial", cloud: true });
   expect(fileLocation(fresh)).toEqual({ local: null, cloud: false });
+  expect(fileLook(done, { userPaused: false, missing: true })).toEqual({ icon: "✓", tone: "warning", label: "已完成 · 本地文件已不在" });
+  expect(fileLook(done, { userPaused: false })).toEqual({ icon: "✓", tone: "done", label: "已完成" });
   for (const state of ["retained", "deleting", "protected"] as const) expect(fileLocation({ ...done, copyState: state }).cloud).toBe(true);
   expect(fileLocation({ ...done, copyState: "deleted" }).cloud).toBe(false);
   expect(shareCounts([done, partial, fresh, { ...done, id: "d", copyState: "retained" }], false, false, new Set(["a"]))).toMatchObject({ cloud: 2, missing: 1 });

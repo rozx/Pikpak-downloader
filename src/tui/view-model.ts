@@ -81,8 +81,9 @@ const pauses: Record<PauseReason, Explanation> = {
 export const pauseExplanation = (pause: Pause): Explanation => pauses[pause.reason];
 
 // 完成优先于取消，取消优先于暂停；失败与等待附带原因。
-export function fileLook(file: FileView, options: { userPaused: boolean; sharePaused?: boolean }): Look {
-  if (file.state === "completed") return stateLooks.completed;
+export function fileLook(file: FileView, options: { userPaused: boolean; sharePaused?: boolean; missing?: boolean }): Look {
+  // 已完成但交付的本地文件已不在：行尾没有本地图标，状态写明原因。
+  if (file.state === "completed") return options.missing ? { ...stateLooks.completed, tone: "warning", label: "已完成 · 本地文件已不在" } : stateLooks.completed;
   if (file.cancelled) return { icon: "⊘", tone: "muted", label: "已取消" };
   if (file.paused || options.sharePaused) return { icon: "⏸", tone: "warning", label: "已暂停" };
   if (options.userPaused && inProgress.includes(file.state)) return { icon: "⏸", tone: "warning", label: "已暂停" };
@@ -134,7 +135,7 @@ export function buildRows(input: { shares: ShareView[]; files: Record<string, Fi
     rows.push({ kind: "share", key: `s:${share.id}`, share, counts: shareCounts(files, input.userPaused, share.paused, missing), expanded });
     if (expanded) for (const file of files) {
       rows.push({ kind: "file", key: `f:${file.id}`, shareId: share.id, file, name: fileName(file.relativePath), path: displayPath(file.relativePath),
-        look: fileLook(file, { userPaused: input.userPaused, sharePaused: share.paused }), location: fileLocation(file, missing.has(file.id)) });
+        look: fileLook(file, { userPaused: input.userPaused, sharePaused: share.paused, missing: missing.has(file.id) }), location: fileLocation(file, missing.has(file.id)) });
     }
   }
   return rows;

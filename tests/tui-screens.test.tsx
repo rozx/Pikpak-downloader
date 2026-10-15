@@ -364,20 +364,25 @@ test("x 在云盘中已没有副本的已完成任务上只删除记录；已完
   expect(frame()).toContain("已完成的删除任务记录"); expect(frame()).toContain("继续时从分享重新转存");
 });
 
-test("位置列：本地、部分、缺失与云端两格；分享行显示在云端与本地缺失数；记录删除后行消失，详情页回到主面板", async () => {
+test("位置图标在行尾：💻 本地文件在、☁️ 云盘有副本，上下对齐；本地文件已不在时写明；分享行显示 ☁️ 数量；记录删除后行消失，详情页回到主面板", async () => {
   const controller = new FakeController();
   const { frame, press } = mount(controller); await settle();
   const line = (name: string) => frame().split("\n").find(item => item.includes(name)) ?? "";
-  expect(line("episode01.mkv")).toMatch(/412 MB\s+本地\s+已完成/);
-  expect(line("episode02.mkv")).toContain("部分 云端");
-  expect(line("episode03.mkv")).not.toMatch(/本地|部分|云端/);
-  expect(line("「某某合集」")).toContain("· 1 在云端");
+  // 行尾两格固定：本地格在前、云端格在后，没有的位置留空。
+  expect(line("episode01.mkv")).toMatch(/已完成\s+💻$/);
+  expect(line("episode02.mkv")).toMatch(/1分19秒\s+☁️$/);
+  expect(line("episode03.mkv")).not.toMatch(/💻|☁️/);
+  // 图标列上下对齐：本地图标与云端图标各在固定的显示列。
+  const column = (name: string, icon: string) => displayWidth(line(name).slice(0, line(name).indexOf(icon)));
+  expect(column("episode02.mkv", "☁️")).toBe(column("第一季", "☁️")); expect(column("episode02.mkv", "☁️")).toBe(column("episode01.mkv", "💻") + 3);
+  expect(line("「某某合集」")).toMatch(/☁️ 1\s+C:\\/); expect(line("「某某合集」")).not.toContain("在云端");
   const files = mockSnapshot().files;
   files.s_1 = files.s_1!.map(item => item.id === "f_1" ? { ...item, copyState: "retained" as const } : item);
   controller.update({ files }); await settle();
-  expect(line("episode01.mkv")).toContain("本地 云端"); expect(line("「某某合集」")).toContain("· 2 在云端");
+  expect(line("episode01.mkv")).toMatch(/💻 ☁️$/); expect(line("「某某合集」")).toContain("☁️ 2");
   controller.update({ localMissing: new Set(["f_1"]) }); await settle();
-  expect(line("episode01.mkv")).toContain("缺失 云端"); expect(line("「某某合集」")).toContain("· 1 本地缺失");
+  expect(line("episode01.mkv")).toContain("已完成 · 本地文件已不在"); expect(line("episode01.mkv")).not.toContain("💻");
+  expect(line("「某某合集」")).toContain("· 1 本地缺失");
   await press(keys.enter);
   expect(frame()).toContain("本地文件"); expect(frame()).toContain("已不存在 · 被移动或删除");
   // 释放成功后记录被删除：详情页回到主面板，行消失。
