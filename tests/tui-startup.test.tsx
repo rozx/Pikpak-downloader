@@ -6,7 +6,7 @@ import { createTheme } from "../src/tui/theme";
 import { login } from "../src/auth/login";
 import { FakeController, eventually, keys, settle, stripAnsi } from "./fixtures/tui";
 import { about } from "../src/about";
-import { LOGO } from "../src/tui/brand";
+import { LOGO, SUBTITLE } from "../src/tui/brand";
 import type { Size } from "../src/tui/main-panel";
 import { rejection } from "./fixtures/rejection";
 
@@ -42,7 +42,7 @@ test("已有实例时只提示并在按键后退出，不触碰登录与任务�
 test("已登录且目录可用时直接进入主面板", async () => {
   const { deps, calls } = fakeDeps();
   const { frame } = mount(deps);
-  await eventually(() => { expect(calls.started).toEqual(["account"]); expect(frame()).toContain("PikPak Downloader"); expect(frame()).toContain("Enter 详情"); });
+  await eventually(() => { expect(calls.started).toEqual(["account"]); expect(frame()).toContain("PikPak DL CLI"); expect(frame()).toContain("Enter 详情"); });
 });
 
 test("未登录：Enter 打开浏览器授权并显示本地入口，Esc 取消授权；界面内没有密码输入", async () => {
@@ -107,7 +107,7 @@ test("启动检查画面显示标志、版本、作者与项目地址，并至�
   const { deps, calls } = fakeDeps();
   const { frame } = mount(deps, { size: { columns: 100, rows: 30 }, splashMs: 300 }); await settle();
   const text = frame();
-  for (const part of [LOGO[0]!, LOGO[5]!, "D  O  W  N  L  O  A  D  E  R", `v${about.version}`, `作者 ${about.author}`, about.site, "正在检查登录状态与下载目录"]) expect(text).toContain(part);
+  for (const part of [LOGO[0]!, LOGO[5]!, SUBTITLE, `v${about.version}`, `作者 ${about.author}`, about.site, "正在检查登录状态与下载目录"]) expect(text).toContain(part);
   expect(calls.started).toEqual([]);
   await Bun.sleep(400); await settle();
   expect(calls.started).toEqual(["account"]); expect(frame()).toContain("Enter 详情");

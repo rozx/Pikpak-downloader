@@ -6,7 +6,7 @@
 <circle cx="20" cy="18" r="6" fill="#ff5f57"/>
 <circle cx="40" cy="18" r="6" fill="#febc2e"/>
 <circle cx="60" cy="18" r="6" fill="#28c840"/>
-<text x="488.4" y="22.5" fill="#6b7089" text-anchor="middle" font-size="12.5">pikpak-downloader</text>
+<text x="488.4" y="22.5" fill="#6b7089" text-anchor="middle" font-size="12.5">pikpak-dl-cli</text>
 <rect x="26.4" y="46.8" width="50.7" height="18" fill="#5a8df0" shape-rendering="crispEdges"/>
 <text x="34.8 51.6" y="60.12" fill="#ffffff" font-weight="700">设置</text>
 <path d="M26.4 73.8H34.8" stroke="#6b7089" stroke-width="1.2" fill="none"/>
@@ -161,12 +161,13 @@
 <text x="538.8 555.6 572.4 589.2 606 622.8 639.6 656.4 673.2" y="348.12" fill="#6b7089">个；名额空出时生效</text>
 <text x="43.2 60" y="402.12" fill="#6b7089">关于</text>
 <text x="177.6 186 194.4 202.8 211.2 219.6" y="402.12" fill="#ffffff">PikPak</text>
-<text x="236.4 244.8 253.2 261.6 270 278.4 286.8 295.2 303.6 312" y="402.12" fill="#ffffff">Downloader</text>
-<text x="337.2 345.6 354 362.4 370.8 379.2" y="402.12" fill="#6b7089">v0.8.0</text>
-<text x="404.4" y="402.12" fill="#6b7089">·</text>
-<text x="429.6 446.4" y="402.12" fill="#6b7089">作者</text>
-<text x="471.6 480 488.4 496.8" y="402.12" fill="#c8cee0">rozx</text>
-<text x="177.6 186 194.4 202.8 211.2 219.6 228 236.4 244.8 253.2 261.6 270 278.4 286.8 295.2 303.6 312 320.4 328.8 337.2 345.6 354 362.4 370.8 379.2 387.6 396 404.4 412.8 421.2 429.6 438 446.4 454.8 463.2 471.6 480 488.4 496.8 505.2 513.6" y="420.12" fill="#5ccfe6">https://github.com/rozx/Pikpak-downloader</text>
+<text x="236.4 244.8" y="402.12" fill="#ffffff">DL</text>
+<text x="261.6 270 278.4" y="402.12" fill="#ffffff">CLI</text>
+<text x="303.6 312 320.4 328.8 337.2 345.6" y="402.12" fill="#6b7089">v0.8.0</text>
+<text x="370.8" y="402.12" fill="#6b7089">·</text>
+<text x="396 412.8" y="402.12" fill="#6b7089">作者</text>
+<text x="438 446.4 454.8 463.2" y="402.12" fill="#c8cee0">rozx</text>
+<text x="177.6 186 194.4 202.8 211.2 219.6 228 236.4 244.8 253.2 261.6 270 278.4 286.8 295.2 303.6 312 320.4 328.8 337.2 345.6 354 362.4 370.8 379.2 387.6 396 404.4 412.8 421.2 429.6 438 446.4 454.8 463.2 471.6 480" y="420.12" fill="#5ccfe6">https://github.com/rozx/pikpak-dl-cli</text>
 <path d="M26.4 433.8H34.8" stroke="#6b7089" stroke-width="1.2" fill="none"/>
 <path d="M34.8 433.8H43.2" stroke="#6b7089" stroke-width="1.2" fill="none"/>
 <path d="M43.2 433.8H51.6" stroke="#6b7089" stroke-width="1.2" fill="none"/>

@@ -2,7 +2,7 @@
 
 This file provides guidance to AI coding agents (Claude Code and others) when working with code in this repository.
 
-PikPak 分享下载器。它监听剪贴板（或接收粘贴）中的完整分享文本，把文件逐个转存到用户的 PikPak 云盘，再下载、校验并发布到本地。云盘只作中转空间，本工具创建的副本可以按需自动回收，也可以手动释放。
+PikPak DL CLI（仓库与可执行文件名 `pikpak-dl-cli`，2026-10-15 由 PikPak Downloader 改名）是 PikPak 分享下载器。它监听剪贴板（或接收粘贴）中的完整分享文本，把文件逐个转存到用户的 PikPak 云盘，再下载、校验并发布到本地。云盘只作中转空间，本工具创建的副本可以按需自动回收，也可以手动释放。
 
 技术栈是 TypeScript 加 Bun 1.4.2；无参数启动时进入 Ink（React）实现的全屏终端界面。代码注释、文档、规格与界面文字都使用中文。
 
@@ -21,6 +21,7 @@ bun scripts/screenshots.tsx                    # 用虚构数据重新生成 REA
 bun run build bun-windows-x64                  # 单文件产物输出到 dist/；目标为 bun-{darwin,windows,linux}-{arm64,x64}，默认取当前平台
 ```
 
+- 改名只涉及对外名称。任务库目录 `PikpakDownloader`、凭据条目 `com.rozx.pikpak-downloader` 与环境变量 `PIKPAK_DOWNLOADER_STATE_DIR` 沿用旧名，已有任务与登录才能继续使用；不要改这些名字。
 - `PIKPAK_DOWNLOADER_STATE_DIR` 用来另指任务库与锁所在的目录，测试与本地试验时使用。默认目录：macOS 为 `~/Library/Application Support/PikpakDownloader`，Windows 为 `%LOCALAPPDATA%\PikpakDownloader`，Linux 为 `$XDG_DATA_HOME/PikpakDownloader`（未设置时为 `~/.local/share/PikpakDownloader`）。
 - 构建 macOS 原生模块（`native/macos.mm`）需要 Xcode Command Line Tools 与 Node-API 头文件，头文件目录可用 `NODE_API_HEADERS` 指定。
 

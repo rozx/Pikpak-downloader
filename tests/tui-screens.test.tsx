@@ -22,7 +22,7 @@ function mount(controller = new FakeController(), size: Size = { columns: 100, r
 test("主面板：标题栏、分组、进度、事件区与按键提示", async () => {
   const { frame } = mount(); await settle();
   const text = frame();
-  for (const part of ["PikPak Downloader", "● 已登录", "云盘 21.0 GB / 10 TB", "本地剩余 412.0 GB", "剪贴板 ● 监听中",
+  for (const part of ["PikPak DL CLI", "● 已登录", "云盘 21.0 GB / 10 TB", "本地剩余 412.0 GB", "剪贴板 ● 监听中",
     "▼ ⧉ 「某某合集」  1/3 完成 · 1 下载中 · 1 排队", "▼ ☁ 「纪录片合集」  0/2 完成 · 1 失败 · 1 等待", "▶ ▣ 「另一个分享」  2/2 完成",
     "48%  198 MB/412 MB  2.7 MB/s  1分19秒", "失败 · 下载地址多次刷新后仍被拒绝", "等待云端空间",
     "22:33:40  ✓ episode01.mkv 校验通过，已完成", "Enter 详情", "p/P 暂停/全部", "x/X 释放/全部"]) expect(text).toContain(part);
@@ -60,7 +60,7 @@ test("列表超过一屏时随选中项滚动，标题栏与按键提示保持�
   const { frame, press } = mount(new FakeController(), { columns: 100, rows: 15 }); await settle();
   await press(...Array(7).fill(keys.down));
   const bottom = frame();
-  expect(bottom).toContain("PikPak Downloader"); expect(bottom).toContain("q 退出");
+  expect(bottom).toContain("PikPak DL CLI"); expect(bottom).toContain("q 退出");
   expect(bottom).toContain("▶ ▣ 「另一个分享」"); expect(bottom).not.toContain("「某某合集」  1/3");
   await press(keys.up);
   expect(frame().split("\n").find(line => line.includes(">"))).toContain("part2.mp4");

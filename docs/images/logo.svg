@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="475.2" height="218" viewBox="0 0 475.2 218" role="img" aria-label="PikPak Downloader">
+<svg xmlns="http://www.w3.org/2000/svg" width="475.2" height="218" viewBox="0 0 475.2 218" role="img" aria-label="PikPak DL CLI">
 <g font-family="'Cascadia Mono', 'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans Mono CJK SC', monospace" font-size="14" xml:space="preserve">
 <rect width="475.2" height="218" rx="14" fill="#16171f"/>
 <rect x="69.6" y="28" width="50.4" height="18" fill="#5ccfe6" shape-rendering="crispEdges"/>
@@ -138,16 +138,12 @@
 <path d="M408.2 118V128.6H414M411.40000000000003 118V125.4H414" stroke="#5a8df0" stroke-width="1.2" fill="none"/>
 <path d="M414 125.4H422.4M414 128.6H422.4" stroke="#5a8df0" stroke-width="1.2" fill="none"/>
 <path d="M428.20000000000005 118V128.6H422.4M425 118V125.4H422.4" stroke="#5a8df0" stroke-width="1.2" fill="none"/>
-<text x="128.4" y="149.32" fill="#ffffff" font-weight="700">D</text>
-<text x="153.6" y="149.32" fill="#ffffff" font-weight="700">O</text>
-<text x="178.8" y="149.32" fill="#ffffff" font-weight="700">W</text>
-<text x="204" y="149.32" fill="#ffffff" font-weight="700">N</text>
-<text x="229.2" y="149.32" fill="#ffffff" font-weight="700">L</text>
-<text x="254.4" y="149.32" fill="#ffffff" font-weight="700">O</text>
-<text x="279.6" y="149.32" fill="#ffffff" font-weight="700">A</text>
-<text x="304.8" y="149.32" fill="#ffffff" font-weight="700">D</text>
-<text x="330" y="149.32" fill="#ffffff" font-weight="700">E</text>
-<text x="355.2" y="149.32" fill="#ffffff" font-weight="700">R</text>
+<text x="170.4" y="149.32" fill="#ffffff" font-weight="700">D</text>
+<text x="195.6" y="149.32" fill="#ffffff" font-weight="700">L</text>
+<text x="229.2" y="149.32" fill="#ffffff" font-weight="700">·</text>
+<text x="262.8" y="149.32" fill="#ffffff" font-weight="700">C</text>
+<text x="288" y="149.32" fill="#ffffff" font-weight="700">L</text>
+<text x="313.2" y="149.32" fill="#ffffff" font-weight="700">I</text>
 <text x="52.8 69.6 86.4 103.2 120 136.8" y="185.32" fill="#6b7089">复制分享文本</text>
 <text x="162" y="185.32" fill="#6b7089">→</text>
 <text x="178.8 195.6 212.4" y="185.32" fill="#6b7089">转存到</text>

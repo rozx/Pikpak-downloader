@@ -42,7 +42,7 @@ description: 准备一次发布：核对 release/x.y.z 分支与 package.json �
 文件：`docs/releaseNotes/v<目标版本>.md`，中文书写。发布工作流按这个路径取文件作为 GitHub Release 的正文，文件缺失时发布失败。
 
 ```markdown
-# PikPak Downloader v<版本>
+# PikPak DL CLI v<版本>
 
 发布日期：<YYYY-MM-DD>
 
@@ -60,12 +60,12 @@ description: 准备一次发布：核对 release/x.y.z 分支与 package.json �
 
 | 平台 | 文件 |
 | --- | --- |
-| macOS Apple 芯片 | `pikpak-downloader-darwin-arm64` |
-| macOS Intel | `pikpak-downloader-darwin-x64` |
-| Windows x64 | `pikpak-downloader-windows-x64.exe` |
-| Windows arm64 | `pikpak-downloader-windows-arm64.exe` |
-| Linux x64（glibc） | `pikpak-downloader-linux-x64` |
-| Linux arm64（glibc） | `pikpak-downloader-linux-arm64` |
+| macOS Apple 芯片 | `pikpak-dl-cli-darwin-arm64` |
+| macOS Intel | `pikpak-dl-cli-darwin-x64` |
+| Windows x64 | `pikpak-dl-cli-windows-x64.exe` |
+| Windows arm64 | `pikpak-dl-cli-windows-arm64.exe` |
+| Linux x64（glibc） | `pikpak-dl-cli-linux-x64` |
+| Linux arm64（glibc） | `pikpak-dl-cli-linux-arm64` |
 
 `SHA256SUMS.txt` 列出各文件的校验和。
 

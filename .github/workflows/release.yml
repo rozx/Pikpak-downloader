@@ -107,7 +107,7 @@ jobs:
         with:
           name: binaries-${{ runner.os }}
           path: |
-            dist/pikpak-downloader-*
+            dist/pikpak-dl-cli-*
           if-no-files-found: error
 
   release:
@@ -132,7 +132,7 @@ jobs:
         working-directory: dist
         run: |
           ls -l
-          sha256sum pikpak-downloader-* > SHA256SUMS.txt
+          sha256sum pikpak-dl-cli-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: 创建标签与发行

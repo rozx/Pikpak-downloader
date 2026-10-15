@@ -61,7 +61,7 @@ describe("提供方请求与脱敏", () => {
     expect(result.clientId).toBe("registered");
     expect(requestBody.application_type).toBe("native");
     expect(requestBody.redirect_uris).toEqual([redirectUri]);
-    expect(requestBody.client_name).toBe("Pikpak Downloader");
+    expect(requestBody.client_name).toBe("PikPak DL CLI");
   });
   test("拒绝注册结果中的不同回调", async () => {
     const http: Transport = async () => Response.json({ client_id: "registered", client_secret: "synthetic",

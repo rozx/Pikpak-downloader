@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/logo.svg" alt="PikPak Downloader" width="560">
+  <img src="docs/images/logo.svg" alt="PikPak DL CLI" width="560">
 </p>
 
 <p align="center">
@@ -8,16 +8,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rozx/Pikpak-downloader/releases/latest"><img src="https://img.shields.io/github/v/release/rozx/Pikpak-downloader?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=5ccfe6" alt="最新版本"></a>
-  <a href="https://github.com/rozx/Pikpak-downloader/releases"><img src="https://img.shields.io/github/downloads/rozx/Pikpak-downloader/total?label=%E4%B8%8B%E8%BD%BD%E6%AC%A1%E6%95%B0&color=9ece6a" alt="下载次数"></a>
-  <a href="https://github.com/rozx/Pikpak-downloader/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/rozx/Pikpak-downloader/release.yml?label=%E5%8F%91%E5%B8%83%E6%9E%84%E5%BB%BA" alt="发布构建"></a>
-  <a href="https://github.com/rozx/Pikpak-downloader/stargazers"><img src="https://img.shields.io/github/stars/rozx/Pikpak-downloader?label=Stars&color=e0af68" alt="Stars"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/rozx/Pikpak-downloader?label=%E8%AE%B8%E5%8F%AF&color=bb9af7" alt="MIT 许可"></a>
+  <a href="https://github.com/rozx/pikpak-dl-cli/releases/latest"><img src="https://img.shields.io/github/v/release/rozx/pikpak-dl-cli?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=5ccfe6" alt="最新版本"></a>
+  <a href="https://github.com/rozx/pikpak-dl-cli/releases"><img src="https://img.shields.io/github/downloads/rozx/pikpak-dl-cli/total?label=%E4%B8%8B%E8%BD%BD%E6%AC%A1%E6%95%B0&color=9ece6a" alt="下载次数"></a>
+  <a href="https://github.com/rozx/pikpak-dl-cli/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/rozx/pikpak-dl-cli/release.yml?label=%E5%8F%91%E5%B8%83%E6%9E%84%E5%BB%BA" alt="发布构建"></a>
+  <a href="https://github.com/rozx/pikpak-dl-cli/stargazers"><img src="https://img.shields.io/github/stars/rozx/pikpak-dl-cli?label=Stars&color=e0af68" alt="Stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/rozx/pikpak-dl-cli?label=%E8%AE%B8%E5%8F%AF&color=bb9af7" alt="MIT 许可"></a>
   <br>
   <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%20%7C%20macOS%20%7C%20Linux-5a8df0" alt="Windows、macOS 与 Linux">
   <img src="https://img.shields.io/badge/Bun-1.4.2-f9f1e1?logo=bun&logoColor=black" alt="Bun 1.4.2">
   <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript 严格模式">
-  <a href="https://github.com/rozx/Pikpak-downloader/commits/main"><img src="https://img.shields.io/github/last-commit/rozx/Pikpak-downloader/main?label=%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4" alt="最近提交"></a>
+  <a href="https://github.com/rozx/pikpak-dl-cli/commits/main"><img src="https://img.shields.io/github/last-commit/rozx/pikpak-dl-cli/main?label=%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4" alt="最近提交"></a>
 </p>
 
 <p align="center">
@@ -33,7 +33,7 @@
 3. 在网页或客户端里一个个点下载；网络一断，大文件往往要从头再来。
 4. 下载完回到云盘，手动删掉这些转存副本，免得占满空间。
 
-分享越大、文件越多，这些重复劳动就越烦人。PikPak Downloader 把整个过程自动化：**你只需要复制分享文本**。它把云盘当作中转站，一次只转存需要的文件，下载完成并校验无误后，在空间不够时自动回收它自己创建的副本。
+分享越大、文件越多，这些重复劳动就越烦人。PikPak DL CLI 把整个过程自动化：**你只需要复制分享文本**。它把云盘当作中转站，一次只转存需要的文件，下载完成并校验无误后，在空间不够时自动回收它自己创建的副本。
 
 ## 功能亮点
 
@@ -49,27 +49,27 @@
 
 ### 1. 下载
 
-从 [Releases](https://github.com/rozx/Pikpak-downloader/releases/latest) 下载对应平台的文件：
+从 [Releases](https://github.com/rozx/pikpak-dl-cli/releases/latest) 下载对应平台的文件：
 
 | 平台 | 文件 |
 | --- | --- |
-| Windows x64 | `pikpak-downloader-windows-x64.exe` |
-| Windows arm64 | `pikpak-downloader-windows-arm64.exe` |
-| macOS Apple 芯片 | `pikpak-downloader-darwin-arm64` |
-| macOS Intel | `pikpak-downloader-darwin-x64` |
-| Linux x64（glibc） | `pikpak-downloader-linux-x64` |
-| Linux arm64（glibc） | `pikpak-downloader-linux-arm64` |
+| Windows x64 | `pikpak-dl-cli-windows-x64.exe` |
+| Windows arm64 | `pikpak-dl-cli-windows-arm64.exe` |
+| macOS Apple 芯片 | `pikpak-dl-cli-darwin-arm64` |
+| macOS Intel | `pikpak-dl-cli-darwin-x64` |
+| Linux x64（glibc） | `pikpak-dl-cli-linux-x64` |
+| Linux arm64（glibc） | `pikpak-dl-cli-linux-arm64` |
 
 `SHA256SUMS.txt` 列出了各文件的校验和。macOS 与 Linux 下载后先加上执行权限，把文件名换成你下载的那一个，例如 Linux x64：
 
 ```sh
-chmod +x ./pikpak-downloader-linux-x64
+chmod +x ./pikpak-dl-cli-linux-x64
 ```
 
-macOS 提示无法验证开发者时，可以移除下载隔离标记后再运行（Intel Mac 换成 `pikpak-downloader-darwin-x64`）：
+macOS 提示无法验证开发者时，可以移除下载隔离标记后再运行（Intel Mac 换成 `pikpak-dl-cli-darwin-x64`）：
 
 ```sh
-xattr -d com.apple.quarantine ./pikpak-downloader-darwin-arm64
+xattr -d com.apple.quarantine ./pikpak-dl-cli-darwin-arm64
 ```
 
 ### 2. 登录
@@ -77,7 +77,7 @@ xattr -d com.apple.quarantine ./pikpak-downloader-darwin-arm64
 在终端中不带参数运行即进入全屏界面（Windows 推荐使用 Windows Terminal）：
 
 ```powershell
-.\pikpak-downloader-windows-x64.exe
+.\pikpak-dl-cli-windows-x64.exe
 ```
 
 首次启动时按 Enter，在浏览器中打开 PikPak 官方授权页。授权页会逐项列出权限，请全部勾选，其中账号信息、管理文件与分享是必需的。密码只在官方页面输入。
@@ -175,14 +175,14 @@ xattr -d com.apple.quarantine ./pikpak-downloader-darwin-arm64
 输出被重定向或在脚本中运行时不会进入全屏界面，可以使用子命令（以 Windows 为例，其他平台替换为对应的文件名）：
 
 ```powershell
-.\pikpak-downloader-windows-x64.exe login                       # 浏览器登录，或核对已有会话
-.\pikpak-downloader-windows-x64.exe watch --output D:\Downloads  # 纯文本的前台监听
-.\pikpak-downloader-windows-x64.exe status                      # 只读查看任务状态，运行中也可以用
-.\pikpak-downloader-windows-x64.exe retry f_1a2b3c4d             # 重试一个文件任务
-.\pikpak-downloader-windows-x64.exe cancel s_1a2b3c4d            # 取消一个分享任务
-.\pikpak-downloader-windows-x64.exe config --connections 6
-.\pikpak-downloader-windows-x64.exe config --files 3
-.\pikpak-downloader-windows-x64.exe logout                      # 清除令牌，保留任务
+.\pikpak-dl-cli-windows-x64.exe login                       # 浏览器登录，或核对已有会话
+.\pikpak-dl-cli-windows-x64.exe watch --output D:\Downloads  # 纯文本的前台监听
+.\pikpak-dl-cli-windows-x64.exe status                      # 只读查看任务状态，运行中也可以用
+.\pikpak-dl-cli-windows-x64.exe retry f_1a2b3c4d             # 重试一个文件任务
+.\pikpak-dl-cli-windows-x64.exe cancel s_1a2b3c4d            # 取消一个分享任务
+.\pikpak-dl-cli-windows-x64.exe config --connections 6
+.\pikpak-dl-cli-windows-x64.exe config --files 3
+.\pikpak-dl-cli-windows-x64.exe logout                      # 清除令牌，保留任务
 ```
 
 示例中的 `f_1a2b3c4d`、`s_1a2b3c4d` 要换成 `status` 列出的文件任务 ID（以 `f_` 开头）或分享任务 ID（以 `s_` 开头）。`watch` 的进度每跨过 10% 或满 30 秒输出一行。除 `status` 外，写操作需要先停止正在运行的界面或 `watch`。完整列表见 `--help`。
@@ -215,7 +215,7 @@ xattr -d com.apple.quarantine ./pikpak-downloader-darwin-arm64
 - [验收状态](docs/acceptance.md)
 
 > [!NOTE]
-> 项目处于 0.x 阶段。实际使用验证集中在 Windows x64；macOS、Windows arm64 与 Linux 桌面尚未完整实机演练，详见[验收状态](docs/acceptance.md)。遇到问题欢迎提交 [Issue](https://github.com/rozx/Pikpak-downloader/issues)。
+> 项目处于 0.x 阶段。实际使用验证集中在 Windows x64；macOS、Windows arm64 与 Linux 桌面尚未完整实机演练，详见[验收状态](docs/acceptance.md)。遇到问题欢迎提交 [Issue](https://github.com/rozx/pikpak-dl-cli/issues)。
 
 ## 开发
 

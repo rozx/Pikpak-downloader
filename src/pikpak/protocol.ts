@@ -120,8 +120,8 @@ export async function register(redirectUri: string, http: Transport = transport)
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      client_name: "Pikpak Downloader",
-      client_uri: "https://github.com/rozx/Pikpak-downloader",
+      client_name: "PikPak DL CLI",
+      client_uri: "https://github.com/rozx/pikpak-dl-cli",
       application_type: "native",
       redirect_uris: [redirectUri],
       grant_types: ["authorization_code", "refresh_token"],

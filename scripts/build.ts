@@ -25,7 +25,7 @@ const devtoolsStub: BunPlugin = {
 await mkdir(join(root, "dist"), { recursive: true });
 for (const target of selected) {
   if (!isTarget(target)) throw Error("目标必须是声明的 macOS、Windows 或 Linux 架构");
-  const outfile = join(root, "dist", `pikpak-downloader-${target.replace("bun-", "")}${target.includes("windows") ? ".exe" : ""}`);
+  const outfile = join(root, "dist", `pikpak-dl-cli-${target.replace("bun-", "")}${target.includes("windows") ? ".exe" : ""}`);
   const platform = target.includes("windows") ? "win32" : target.includes("linux") ? "linux" : "darwin";
   const arch = target.endsWith("arm64") ? "arm64" : "x64";
   const build = await Bun.build({

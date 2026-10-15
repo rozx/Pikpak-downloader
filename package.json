@@ -1,8 +1,8 @@
 {
-  "name": "pikpak-downloader",
+  "name": "pikpak-dl-cli",
   "version": "0.8.0",
   "author": "rozx",
-  "homepage": "https://github.com/rozx/Pikpak-downloader",
+  "homepage": "https://github.com/rozx/pikpak-dl-cli",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.2",

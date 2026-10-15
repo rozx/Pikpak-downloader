@@ -13,7 +13,7 @@ const { render, Box, Text } = await import("ink");
 const { TuiApp } = await import("../src/tui/app");
 const { StartupApp } = await import("../src/tui/startup");
 const { createTheme } = await import("../src/tui/theme");
-const { LOGO } = await import("../src/tui/brand");
+const { LOGO, SUBTITLE } = await import("../src/tui/brand");
 const { SPINNER } = await import("../src/tui/parts");
 const SPINNER_FRAMES = new RegExp(`[${SPINNER}]`, "g");
 const { FakeController, file, keys, share } = await import("../tests/fixtures/tui");
@@ -251,7 +251,7 @@ function windowSvg(frame: string, size: Size, label: string): string {
     `<rect x="0.5" y="0.5" width="${round(width - 1)}" height="${round(height - 1)}" rx="10" fill="none" stroke="#2f3242"/>`,
     `<path d="M0.5 ${bar}H${round(width - 0.5)}" stroke="#262836"/>`,
     ...["#ff5f57", "#febc2e", "#28c840"].map((color, index) => `<circle cx="${20 + index * 20}" cy="${bar / 2}" r="6" fill="${color}"/>`),
-    `<text x="${round(width / 2)}" y="${bar / 2 + 4.5}" fill="#6b7089" text-anchor="middle" font-size="12.5">pikpak-downloader</text>`,
+    `<text x="${round(width / 2)}" y="${bar / 2 + 4.5}" fill="#6b7089" text-anchor="middle" font-size="12.5">pikpak-dl-cli</text>`,
     drawCells(rows, pad, bar + pad * 0.6),
   ];
   return svg(width, height, label, body.join("\n"));
@@ -264,7 +264,7 @@ function logoSvg(frame: string): string {
   const columns = Math.max(...rows.map(row => row.length));
   const padX = 36, padY = 28, width = columns * CELL_W + padX * 2, height = rows.length * CELL_H + padY * 2;
   const body = [`<rect width="${round(width)}" height="${round(height)}" rx="14" fill="${BACKGROUND}"/>`, drawCells(rows, padX, padY)];
-  return svg(width, height, "PikPak Downloader", body.join("\n"));
+  return svg(width, height, "PikPak DL CLI", body.join("\n"));
 }
 
 // ---------- 各个画面 ----------
@@ -275,7 +275,7 @@ function Logo() {
       {LOGO.map((line, index) => (
         <Text key={index}>{(line.match(/█+|[^█]+/g) ?? []).map((run, at) => <Text key={at} {...theme.paint(run.startsWith("█") ? "active" : "transfer")}>{run}</Text>)}</Text>
       ))}
-      <Text {...theme.paint("strong")} bold>D  O  W  N  L  O  A  D  E  R</Text>
+      <Text {...theme.paint("strong")} bold>{SUBTITLE}</Text>
       <Text> </Text>
       <Text {...theme.paint("muted")}>复制分享文本 → 转存到 PikPak 云盘 → 下载到本地</Text>
     </Box>

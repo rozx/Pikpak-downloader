@@ -12,7 +12,7 @@ const glyphs: Record<string, string[]> = {
 };
 export const LOGO = [0, 1, 2, 3, 4, 5].map(row => [..."PIKPAK"].map(letter => glyphs[letter]![row]).join(""));
 export const LOGO_WIDTH = Math.max(...LOGO.map(displayWidth));
-const SUBTITLE = "D  O  W  N  L  O  A  D  E  R";
+export const SUBTITLE = "D  L   ·   C  L  I";
 // 标志 6 行、副标题、空行、版本信息与说明各 1 行。
 export const BRAND_LINES = LOGO.length + 4;
 

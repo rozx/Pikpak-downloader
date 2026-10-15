@@ -21,8 +21,8 @@ import { storedTier, tierCap } from "./pikpak/tier";
 const help = `${about.name} ${about.version}
 把 PikPak 云盘作为下载中转空间。作者 ${about.author} · ${about.homepage}
 
-用法：pikpak-downloader              在交互终端中打开全屏界面（检查登录与下载目录后开始监听）
-      pikpak-downloader <命令> [选项] 供脚本或非交互场景使用
+用法：pikpak-dl-cli                  在交互终端中打开全屏界面（检查登录与下载目录后开始监听）
+      pikpak-dl-cli <命令> [选项]     供脚本或非交互场景使用
 
   --help                 显示帮助
   --version              显示版本
