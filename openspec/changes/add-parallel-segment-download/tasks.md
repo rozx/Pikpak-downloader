@@ -1,5 +1,7 @@
 # Tasks
 
+2026-10-15：按用户指示，真实端到端任务 5.2 标记完成。用户在 Windows 上用真实账号完成多连接下载、中断恢复与校验发布；macOS 未单独实测，未记录正式的速度对比。
+
 本变更必须等 P1、P2 验证（第 1 组）通过后才能进入实现。实现依赖 `add-clipboard-download-workflow` 的现有代码；`add-interactive-tui` 的执行器中断（`RuntimeSession` 每步独立中断控制器）与进度事件 `{ type, id, bytes, size }` 已在 main（截至 `3111468`），涉及 `src/runtime/engine.ts` 的任务直接在其上实现。各组区分真实接口、模拟服务和实际操作系统三类验证，不用其中一种代替另一种。
 
 ## 1. Feasibility
@@ -36,5 +38,5 @@
 ## 5. Acceptance
 
 - [x] 5.1 用模拟服务端运行故障矩阵：多连接下载过程中依次触发 429、403 地址过期、版本变化、200 忽略范围、`Content-Range` 错误、截断、停滞、402、本地磁盘写满、进程崩溃后恢复，以及临时文件被改动。验收：每一项都有可重复通过的测试，结果符合 `share-downloads` 规格增量。
-- [ ] 5.2 用明确指定的真实账号和样本，在 macOS 与 Windows 上完成端到端下载：多连接下载、中途中断并恢复、GCID 校验通过、不覆盖发布。记录速度对比与运行矩阵。验收：真实场景不能由合成测试代替；Windows 实测未通过时，不能宣称 Windows 已支持并行下载。
+- [x] 5.2 用明确指定的真实账号和样本，在 macOS 与 Windows 上完成端到端下载：多连接下载、中途中断并恢复、GCID 校验通过、不覆盖发布。记录速度对比与运行矩阵。验收：真实场景不能由合成测试代替；Windows 实测未通过时，不能宣称 Windows 已支持并行下载。
 - [x] 5.3 更新 `docs/downloads.md` 中关于单连接的说明，补充连接数配置、限流降级和回退行为；运行独立类型检查、`bun test` 和 `openspec validate add-parallel-segment-download --strict`。验收：文档与规格一致，任务只在相应实现和验证完成后才勾选。
