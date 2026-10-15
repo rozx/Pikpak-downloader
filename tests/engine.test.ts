@@ -10,7 +10,7 @@ import { systemFiles } from "../src/platform/file-system";
 import { Drive } from "../src/pikpak/drive";
 import { ProviderError, requestJson, type Transport } from "../src/pikpak/protocol";
 import type { PikpakClient } from "../src/pikpak/client";
-import { Engine } from "../src/runtime/engine";
+import { Engine, type RuntimeEvent } from "../src/runtime/engine";
 import type { LocalFileSystem } from "../src/platform/files";
 
 // 本地文件适配层在 macOS 与 Windows 上各有实现；Windows 实现背后是常驻桥接进程，测试结束时关闭。
@@ -78,6 +78,54 @@ test.if(nativeFiles)("分享总大小大于容量，逐文件转存、交付、�
     expect(f.store.summary("account", f.share.id)).toMatchObject({ status: "completed", total: 2, completed: 2 });
     expect(f.state.saves).toBe(2); expect(f.state.deleted).toEqual(["copy-1"]); expect(f.state.usage).toBe(50n);
     for (const file of f.store.files("account")) expect(await readFile(f.store.delivery("account", file.id)!.targetPath)).toEqual(f.sources.find(source => source.id === file.sourceId)!.bytes);
+  } finally { await f.close(); }
+});
+
+test.if(nativeFiles)("用户暂停时不扫描、不转存、不下载、不回收；与系统暂停并存时解除其一仍不调度", async () => {
+  const f = await fixture(); const signal = new AbortController().signal; let requests = 0;
+  const engine = new Engine(f.store, f.secrets, new Drive({ request: async (account, path, init = {}, before) => { requests++; return f.api.request(account, path, init, before); } }, "account"),
+    localFiles(), () => {}, async (url, init) => { requests++; return f.fetch(url, init); }, async () => {});
+  try {
+    f.store.setConfig("queue_paused", "1");
+    expect(await engine.step(signal)).toBe(false);
+    expect(requests).toBe(0); expect(f.store.files("account")).toHaveLength(0); expect(f.store.share("account", f.share.id).scanStatus).toBe("pending");
+    f.store.pause("account", "authentication");
+    f.store.setConfig("queue_paused", "0");
+    expect(await engine.step(signal)).toBe(false);
+    f.store.setConfig("queue_paused", "1"); f.store.clearAuthenticationPause("account");
+    expect(await engine.step(signal)).toBe(false);
+    expect(requests).toBe(0);
+    f.store.setConfig("queue_paused", "0");
+    expect(await engine.step(signal)).toBe(true);
+    expect(requests).toBeGreaterThan(0);
+  } finally { await f.close(); }
+});
+
+test.if(nativeFiles)("下载进度事件携带字节与大小，每秒最多 4 次", async () => {
+  const f = await fixture(1, [64 * 1024]); const signal = new AbortController().signal; f.state.limit = 10n ** 9n;
+  const events: Array<{ at: number; event: RuntimeEvent }> = [];
+  // 把内容拆成 32 块、每块间隔 40 ms 推送（约 1.3 秒），覆盖多个节流窗口。
+  const slow = async (url: string, init: RequestInit) => {
+    const response = await f.fetch(url, init); const bytes = new Uint8Array(await response.arrayBuffer());
+    const stream = new ReadableStream<Uint8Array>({ async start(controller) {
+      for (let offset = 0; offset < bytes.length; offset += 2048) { controller.enqueue(bytes.slice(offset, offset + 2048)); await Bun.sleep(40); }
+      controller.close();
+    } });
+    return new Response(stream, { status: response.status, headers: response.headers });
+  };
+  const engine = new Engine(f.store, f.secrets, new Drive(f.api, "account"), localFiles(), event => events.push({ at: Date.now(), event }), slow, async () => {});
+  try {
+    for (let i = 0; i < 5 && await engine.step(signal); i++) {}
+    const file = f.store.files("account")[0]!;
+    expect(file.state).toBe("completed");
+    const progress = events.filter(item => item.event.type === "progress");
+    expect(progress.length).toBeGreaterThanOrEqual(3);
+    for (const [index, item] of progress.entries()) {
+      expect(item.event).toMatchObject({ id: file.id, size: 65536n });
+      expect(item.event.bytes! > 0n && item.event.bytes! <= 65536n).toBe(true);
+      const previous = progress[index - 1];
+      if (previous) { expect(item.at - previous.at).toBeGreaterThanOrEqual(240); expect(item.event.bytes! > previous.event.bytes!).toBe(true); }
+    }
   } finally { await f.close(); }
 });
 

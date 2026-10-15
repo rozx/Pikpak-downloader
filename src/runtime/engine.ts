@@ -12,7 +12,7 @@ import { download, DownloadError, remainingBytes, type DownloadTransport } from 
 import { publishVerified, reconcilePublication } from "../download/publish";
 import { originalLink, secureDownloadUrl } from "../download/original-link";
 
-export type RuntimeEvent = { type: string; id?: string; reason?: string; percent?: number; count?: number };
+export type RuntimeEvent = { type: string; id?: string; reason?: string; count?: number; bytes?: bigint; size?: bigint };
 export class Engine {
   private readonly restore: Restore;
   private readonly space: SpaceManager;
@@ -98,7 +98,8 @@ export class Engine {
   }
   async step(signal: AbortSignal): Promise<boolean> {
     const account = this.drive.accountId;
-    if (signal.aborted || this.blocked || this.store.paused(account) || this.store.rateLimited(account)) return false;
+    // 用户暂停与系统暂停分开记录，任一存在都不调度新的扫描、转存、下载或回收；对已发出操作的核对不受影响。
+    if (signal.aborted || this.blocked || this.store.paused(account) || this.store.config("queue_paused") === "1" || this.store.rateLimited(account)) return false;
     const preferred = this.preferFile ? this.store.nextFile(account) : null;
     const scan = preferred ? null : this.store.nextScan(account);
     if (scan) {
@@ -170,7 +171,7 @@ export class Engine {
       if (file.state === "saving") this.store.transition(account, file.id, "reconciling");
       this.event({ type: "downloading", id: file.id });
       await download(this.store, account, file, copy, workspace, () => this.drive.file(copy!.remoteId, signal), signal, bytes => {
-        if (Date.now() - this.lastProgress >= 1000) { this.lastProgress = Date.now(); this.event({ type: "progress", id: file!.id, percent: Number(file!.size ? bytes * 100n / file!.size : 100n) }); }
+        if (Date.now() - this.lastProgress >= 250) { this.lastProgress = Date.now(); this.event({ type: "progress", id: file!.id, bytes, size: file!.size }); }
       }, this.http);
       this.event({ type: "completed", id: file.id }); return true;
     } catch (error) {

@@ -16,8 +16,15 @@ import type { LocalFileSystem } from "../platform/files";
 
 const labels: Record<string, string> = { scanning: "正在扫描", scanned: "扫描完成", scan_incomplete: "扫描未完整完成", scan_waiting: "扫描等待处理",
   saving: "正在准备转存", downloading: "正在下载", completed: "已完成", waiting_space: "等待云端空间", paused: "执行已暂停", attention: "需要核对", file_waiting: "文件等待处理" };
+const printedPercent = new Map<string, number>();
 export function printEvent(event: RuntimeEvent): void {
-  if (event.type === "progress") { console.log(`下载进度 ${event.id}: ${event.percent}%`); return; }
+  if (event.type === "progress") {
+    // 进度事件每秒最多 4 次；同一文件的百分比未变化时不重复打印。
+    const percent = event.size ? Number((event.bytes ?? 0n) * 100n / event.size) : 100;
+    if (event.id && printedPercent.get(event.id) === percent) return;
+    if (event.id) printedPercent.set(event.id, percent);
+    console.log(`下载进度 ${event.id}: ${percent}%`); return;
+  }
   console.log(`${labels[event.type] ?? event.type}${event.id ? ` ${event.id}` : ""}${event.count !== undefined ? `，文件版本数 ${event.count}` : ""}${event.reason ? `，原因：${event.reason}` : ""}`);
 }
 export async function watch(store: Store, output: string | null, signal: AbortSignal): Promise<void> {
