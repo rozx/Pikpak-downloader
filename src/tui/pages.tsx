@@ -11,7 +11,7 @@ import { DEFAULT_CONNECTIONS, MAX_CONNECTIONS } from "../download/connections";
 import { DEFAULT_ACTIVE_FILES, MAX_ACTIVE_FILES } from "../runtime/active-files";
 import { PAID_ACTIVE_FILES } from "../pikpak/tier";
 import type { AccountView, TuiSnapshot } from "./controller";
-import { missingPermissions, permissionNames, permissionRows } from "../auth/permissions";
+import { informativeScopes, missingPermissions, permissionNames, permissionRows } from "../auth/permissions";
 
 const copyStates: Record<string, string> = { retained: "保留中 · 按 x 可立即释放", deleting: "删除中", deleted: "已删除 · 不在云盘中", protected: "受保护 · 不会自动删除" };
 // 本地文件一行（add-task-controls 决策 6）：已完成看交付的文件是否仍在，未完成看断点。
@@ -58,7 +58,7 @@ function membershipText(account: AccountView | null): [string, Tone] {
 }
 function permissionSummary(account: AccountView | null): [string, Tone] {
   if (!account) return ["暂不可用", "muted"];
-  if (!account.scopes) return ["无法确认", "muted"];
+  if (!informativeScopes(account.scopes)) return ["无法确认", "muted"];
   const missing = missingPermissions(account.scopes);
   return missing.length ? [`缺少 ${permissionNames(missing)}`, "error"] : ["完整", "done"];
 }
@@ -162,7 +162,7 @@ export function AccountPage({ account, quota, confirming, size, theme }: {
           </Box>
         </Box>
         {missing.length > 0 && <Text {...theme.paint("error")}>  ✗ 缺少必须的权限：{permissionNames(missing)}。按 r 重新授权，并在授权页勾选全部权限。</Text>}
-        {account && !account.scopes && <Text {...theme.paint("muted")}>  服务端未返回授权范围，无法确认已授予的权限；操作被拒绝时按 r 重新授权。</Text>}
+        {account && !informativeScopes(account.scopes) && <Text {...theme.paint("muted")}>  服务端返回的授权范围不含应用权限，无法确认授权页的勾选结果；操作被拒绝时按 r 重新授权。</Text>}
         {confirming && <Box marginTop={1}><ConfirmDialog heading="登出" title="停止下载并登出当前账号？" confirm="确认登出" theme={theme}
           detail="下载在安全点停止并清除令牌；任务、分享资料与本地文件保留。" /></Box>}
       </Box>

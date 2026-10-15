@@ -14,11 +14,21 @@ test("授权范围：解析空格分隔或数组，JWT 载荷作为后备，未�
   expect(jwtScopes(jwt({ scope: "account share" }))).toEqual(["account", "share"]);
   expect(jwtScopes(jwt({ scp: ["files:manage"] }))).toEqual(["files:manage"]);
   expect(jwtScopes("opaque-token")).toBe(null); expect(jwtScopes("a.!!!.c")).toBe(null);
-  expect(grantedScopes({ accessToken: jwt({ scope: "account" }), scope: ["share"] })).toEqual(["share"]);
+  expect(grantedScopes({ accessToken: jwt({ scope: "account" }), scope: ["share"] })).toEqual(["share", "account"]);
+  expect(grantedScopes({ accessToken: "opaque-token", scope: ["openid", "profile"] })).toEqual(["openid", "profile"]);
+  expect(grantedScopes({ accessToken: "opaque-token" })).toBe(null);
   expect(grantedScopes({ accessToken: jwt({ scope: "account" }) })).toEqual(["account"]);
   expect(missingPermissions(null)).toEqual([]);
   expect(permissionNames(missingPermissions(["account", "cloud_download"]))).toBe("管理文件、分享");
   expect(missingPermissions(["account", "files:manage", "share"])).toEqual([]);
+});
+
+test("实测回归：服务端只回显登录基础范围时视为未知，不判定缺少权限", () => {
+  for (const scopes of [["openid", "profile"], ["openid", "profile", "email"], ["user:extra"]]) {
+    expect(missingPermissions(scopes)).toEqual([]);
+    expect(permissionRows(scopes).filter(row => row.scope !== "user:extra").every(row => row.state === "unknown")).toBe(true);
+  }
+  expect(permissionRows(["openid", "user:extra"]).at(-1)).toMatchObject({ scope: "user:extra", state: "granted" });
 });
 
 test("权限行：已知权限按顺序列出状态，登录基础范围不显示，其他范围附在末尾", () => {
@@ -74,12 +84,14 @@ test("授权缺少必须的权限：不保存，结果页列出缺少项并可�
   expect(f.accepted).toHaveLength(1); expect(f.accepted[0]!.scope).toEqual(["account", "files:manage", "share"]);
 });
 
-test("服务端未返回授权范围时照常保存", async () => {
-  const f = flow([undefined]);
-  const pending = login(f.session, true, () => {}, { openBrowser: async () => {}, http: f.http });
-  await Bun.sleep(50);
-  expect(await f.callback(await f.authorize(), "synthetic-code")).toContain("登录完成");
-  expect(await pending).toBe("account"); expect(f.accepted[0]!.scope).toBeUndefined();
+test("服务端未返回授权范围，或只回显登录基础范围时，照常保存", async () => {
+  for (const scope of [undefined, "openid profile"]) {
+    const f = flow([scope]);
+    const pending = login(f.session, true, () => {}, { openBrowser: async () => {}, http: f.http });
+    await Bun.sleep(50);
+    expect(await f.callback(await f.authorize(), "synthetic-code")).toContain("登录完成");
+    expect(await pending).toBe("account"); expect(f.accepted[0]!.scope).toEqual(scope ? ["openid", "profile"] : undefined);
+  }
 });
 
 test("非强制登录：已有会话缺少必须的权限时不复用，改走浏览器授权", async () => {

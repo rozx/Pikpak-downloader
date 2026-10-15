@@ -455,7 +455,7 @@ test("账号页标出缺少的必须权限；授权范围未知或资料未读�
   await press(keys.enter);
   expect(frame()).toContain("✗ 管理文件"); expect(frame()).toContain("✗ 云下载"); expect(frame()).toContain("缺少必须的权限：管理文件。按 r 重新授权");
   controller.update({ account: { ...mockSnapshot().account!, scopes: null, membership: null } }); await settle();
-  expect(frame()).toContain("? 管理文件"); expect(frame()).toContain("无法确认已授予的权限"); expect(frame()).toContain("暂不可用");
+  expect(frame()).toContain("? 管理文件"); expect(frame()).toContain("无法确认授权页的勾选结果"); expect(frame()).toContain("暂不可用");
   controller.update({ account: null, quota: null }); await settle();
   expect(frame()).toContain("正在读取…"); expect(frame()).toContain("暂不可用");
 });

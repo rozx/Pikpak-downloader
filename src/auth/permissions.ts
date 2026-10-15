@@ -23,19 +23,29 @@ export function jwtScopes(token: string): string[] | null {
     return payload && typeof payload === "object" ? parseScopes(payload.scope) ?? parseScopes(payload.scp) : null;
   } catch { return null; }
 }
+// 合并令牌响应与访问令牌载荷中的范围；两处都没有时为未知。
 export function grantedScopes(tokens: { accessToken: string; scope?: string[] }): string[] | null {
-  return tokens.scope ?? jwtScopes(tokens.accessToken);
+  const response = tokens.scope, claims = jwtScopes(tokens.accessToken);
+  return response || claims ? [...new Set([...response ?? [], ...claims ?? []])] : null;
 }
+// 实测（2026-10-15）：用户在授权页勾选全部权限后，服务端返回的范围仍不含任何应用权限，
+// 只是回显登录基础范围。范围里一项应用权限都没有时，它不能说明授权页的勾选结果，按未知处理。
+const known = new Set(PERMISSIONS.map(permission => permission.scope));
+export const informativeScopes = (scopes: readonly string[] | null): readonly string[] | null =>
+  scopes?.some(scope => known.has(scope)) ? scopes : null;
 // 授权范围未知时不判定缺少。
-export const missingPermissions = (scopes: readonly string[] | null): Permission[] =>
-  scopes ? PERMISSIONS.filter(permission => permission.required && !scopes.includes(permission.scope)) : [];
+export function missingPermissions(scopes: readonly string[] | null): Permission[] {
+  const granted = informativeScopes(scopes);
+  return granted ? PERMISSIONS.filter(permission => permission.required && !granted.includes(permission.scope)) : [];
+}
 
 export type PermissionState = "granted" | "missing" | "unknown";
 export type PermissionRow = Permission & { state: PermissionState };
 // 已知权限按定义顺序列出，再附上未知的额外范围。
+// 其他范围即使不足以判断应用权限也照样列出，便于对照授权页。
 export function permissionRows(scopes: readonly string[] | null): PermissionRow[] {
-  const rows: PermissionRow[] = PERMISSIONS.map(permission => ({ ...permission, state: !scopes ? "unknown" : scopes.includes(permission.scope) ? "granted" : "missing" }));
-  const known = new Set(PERMISSIONS.map(permission => permission.scope));
+  const granted = informativeScopes(scopes);
+  const rows: PermissionRow[] = PERMISSIONS.map(permission => ({ ...permission, state: !granted ? "unknown" : granted.includes(permission.scope) ? "granted" : "missing" }));
   for (const scope of scopes ?? []) if (!known.has(scope) && !BASIC.has(scope)) rows.push({ scope, label: scope, use: "其他权限", required: false, state: "granted" });
   return rows;
 }
