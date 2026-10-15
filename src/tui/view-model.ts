@@ -162,7 +162,9 @@ export function describeEvent(event: RuntimeEvent, names: NameLookup): LogLine |
       if (kind === "cancel") return { icon: "⊘", tone: "muted", text: `已取消 ${target(event.id)}` };
       if (kind === "pauseQueue") return { icon: "⏸", tone: "warning", text: "队列已暂停" };
       if (kind === "resumeQueue") return { icon: "▶", tone: "active", text: "队列已继续" };
-      if (kind === "setOutputRoot") return { icon: "●", tone: "done", text: "下载目录已更新，只影响之后接收的分享" };
+      if (kind === "setOutputRoot") return { icon: "●", tone: "done", text: event.count
+        ? `下载目录已更新，${event.count} 个尚未开始的分享改用新目录；已开始或已完成的分享保留原目录`
+        : "下载目录已更新；已开始或已完成的分享保留原目录" };
       if (kind === "setClipboardWatch") return { icon: "●", tone: "done", text: "剪贴板监听设置已更新" };
       if (kind === "setDownloadConnections") return { icon: "●", tone: "done", text: "下载连接数已更新，从下一个文件开始生效" };
       if (kind === "setActiveFiles") return { icon: "●", tone: "done", text: "同时下载的文件数已更新，名额空出时生效" };

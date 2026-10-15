@@ -126,6 +126,7 @@ export class RuntimeSession {
       else if (command.kind === "setOutputRoot") {
         const root = await writableDirectory(command.path);
         this.store.setConfig("output_root", root); this.receiver.setOutputRoot(root);
+        result = { ok: true, ids: this.store.moveUnstartedShares(account, root), issues: [] };
       } else if (command.kind === "setDownloadConnections") saveConnections(this.store, command.count);
       else if (command.kind === "setActiveFiles") saveActiveFiles(this.store, command.count);
       else if (command.kind === "setClipboardWatch") {
@@ -136,7 +137,7 @@ export class RuntimeSession {
         this.report(intake);
         result = intake.failure ? { ok: false, reason: intake.failure } : { ok: true, ids: intake.ids, issues: intake.issues };
       }
-      this.emit({ type: "command", reason: command.kind, ...id });
+      this.emit({ type: "command", reason: command.kind, ...id, ...(command.kind === "setOutputRoot" && result.ok ? { count: result.ids.length } : {}) });
       return result;
     } catch (error) {
       const reason = error instanceof AppError ? error.code : "operation_failed";

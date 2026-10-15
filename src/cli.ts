@@ -122,7 +122,8 @@ export async function runCli(args: string[]): Promise<void> {
           if (!(await stat(output)).isDirectory()) throw new AppError("invalid_input");
           await access(output, constants.W_OK | constants.X_OK);
           store.setConfig("output_root", output);
-          console.log("已保存新分享的默认下载目录；已有分享保持原目录。");
+          const account = store.config("active_account"), moved = account ? store.moveUnstartedShares(account, output).length : 0;
+          console.log(`已保存默认下载目录${moved ? `；${moved} 个尚未开始的分享改用新目录` : ""}；已开始或已完成的分享保留原目录。`);
         } else {
           const account = activeAccount(store);
           if (command === "cancel") { store.cancel(account, args[1]!); store.recheckCancelledPause(account); console.log("已取消未完成工作；本地文件、云端副本和操作记录均保留。"); }

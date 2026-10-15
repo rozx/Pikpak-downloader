@@ -298,3 +298,22 @@ test("显式重试清除顺序模式标记，自动重试保留", () => {
   expect(f.store.delivery("account-a", f.file.id)?.prefixSha256).toBe("a".repeat(64));
 });
 
+test("改目录时只迁移本地尚未开始的分享：根目录未打开、没有目录映射、没有交付记录", () => {
+  const f = fixture();
+  const unstarted = f.store.accept("account-a", "unstarted", "/fixed-output", "secret-u");
+  const bound = f.store.accept("account-a", "bound", "/fixed-output", "secret-b");
+  f.store.bindRoot("account-a", bound.id, { volume: "v", file: "root" });
+  const mapped = f.store.accept("account-a", "mapped", "/fixed-output", "secret-m");
+  f.store.recordDirectory("account-a", mapped.id, { nodeId: "@share", parentId: "@root", name: "mapped", folded: "mapped", volume: "v", identity: "d" });
+  // f.share 有一个文件已分配交付记录。
+  f.store.transition("account-a", f.file.id, "ready"); f.store.transition("account-a", f.file.id, "downloading");
+  f.store.allocateDelivery("account-a", f.file.id, "/fixed-output/tmp", "/fixed-output/final");
+  const other = f.store.accept("account-b", "other-account", "/fixed-output", "secret-o");
+  expect(f.store.moveUnstartedShares("account-a", "/new-output")).toEqual([unstarted.id]);
+  expect(f.store.share("account-a", unstarted.id).outputRoot).toBe("/new-output");
+  for (const share of [bound, mapped, f.share]) expect(f.store.share("account-a", share.id).outputRoot).toBe("/fixed-output");
+  expect(f.store.share("account-b", other.id).outputRoot).toBe("/fixed-output");
+  expect(f.store.moveUnstartedShares("account-a", "/new-output")).toEqual([]);
+  expect(() => f.store.moveUnstartedShares("account-a", "")).toThrow();
+});
+

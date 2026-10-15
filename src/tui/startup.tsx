@@ -143,7 +143,7 @@ export function StartupApp({ deps, theme = createTheme(), size: fixedSize, splas
       <Box flexDirection="column" flexGrow={1} paddingTop={1} gap={1}>
         <Text {...theme.paint("text")}>选择下载目录：</Text>
         <Text {...theme.paint("strong")}>{phase.draft}<Text {...theme.paint("key")}>▌</Text></Text>
-        <Text {...theme.paint("muted")}>目录不存在时会自动创建；之后可以在设置页修改，只影响之后接收的分享。</Text>
+        <Text {...theme.paint("muted")}>目录不存在时会自动创建；之后可以在设置页修改，已开始下载的分享保留原目录。</Text>
         {phase.error && <Text {...theme.paint("error")}>✗ {phase.error}</Text>}
       </Box>
       <Rule width={size.columns - 2} theme={theme} />

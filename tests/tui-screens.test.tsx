@@ -133,7 +133,7 @@ test("详情页显示路径、原因与建议、断点、副本和本地目标",
 test("设置页修改下载目录与剪贴板监听；目录不可用时显示原因", async () => {
   const { controller, frame, press } = mount(); await settle();
   await press("s");
-  expect(frame()).toContain("下载目录"); expect(frame()).toContain("● 开"); expect(frame()).toContain("仅对新接收的分享生效");
+  expect(frame()).toContain("下载目录"); expect(frame()).toContain("● 开"); expect(frame()).toContain("新分享与尚未开始的分享使用新目录");
   await press(keys.down, " ");
   expect(controller.commands).toEqual([{ kind: "setClipboardWatch", enabled: false }]);
   await press(keys.up, keys.enter, "\\", "n", "e", "w");

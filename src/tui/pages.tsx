@@ -69,7 +69,7 @@ export function SettingsPage({ outputRoot, clipboardOn, connections, activeFiles
         {item(0, "下载目录", on => editing
           ? <Text {...theme.paint("strong", on)}>{draft}<Text {...theme.paint("key", on)}>▌</Text></Text>
           : <Text {...theme.paint("strong", on)}>{truncateMiddle(outputRoot ?? "未设置", size.columns - 22)}</Text>,
-          editing ? "输入或粘贴目录后按 Enter 保存，Esc 放弃" : "仅对新接收的分享生效，已有分享沿用原目录")}
+          editing ? "输入或粘贴目录后按 Enter 保存，Esc 放弃" : "新分享与尚未开始的分享使用新目录；已开始或已完成的分享保留原目录")}
         {item(1, "剪贴板监听", on => <Text {...theme.paint(clipboardOn ? "done" : "muted", on)}>{clipboardOn ? "● 开" : "○ 关"}</Text>, "关闭后只能用 a 粘贴分享文本")}
         {item(2, "下载连接数", on => (
           <Text>
@@ -87,7 +87,7 @@ export function SettingsPage({ outputRoot, clipboardOn, connections, activeFiles
         {error && <Text {...theme.paint("error")}>✗ {error}</Text>}
         <Box flexGrow={1} />
         <Box>
-          <Box width={16} flexShrink={0}><Text {...theme.paint("muted")}>  关于</Text></Box>
+          <Box width={18} flexShrink={0}><Text {...theme.paint("muted")}>  关于</Text></Box>
           <Box flexDirection="column">
             <Text><Text {...theme.paint("strong")}>{about.name}</Text><Text {...theme.paint("muted")}>  v{about.version}  ·  作者 </Text><Text {...theme.paint("text")}>{about.author}</Text></Text>
             <Text {...theme.paint("active")}>{about.homepage}</Text>

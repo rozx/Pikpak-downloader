@@ -156,6 +156,19 @@ export class Store {
     if (current.volume === null && current.identity === null) this.run("UPDATE shares SET root_volume=?,root_identity=? WHERE id=?", identity.volume, identity.file, shareId);
     else if (current.volume !== identity.volume || current.identity !== identity.file) throw new AppError("needs_reconciliation");
   }
+  // 修改默认下载目录时，把本地还没有任何内容的分享改到新目录：根目录从未打开、没有目录映射、没有文件的交付记录。
+  // 已开始或已完成的分享保留原目录，因为它们的临时文件、目录映射和成品都在那里。
+  moveUnstartedShares(accountId: string, outputRoot: string): string[] {
+    if (!outputRoot) throw new AppError("invalid_input");
+    return this.transaction(() => {
+      const rows = this.all<{ id: string }>(`SELECT s.id FROM shares s WHERE s.account_id=? AND s.output_root<>?
+        AND s.root_volume IS NULL AND s.root_identity IS NULL
+        AND NOT EXISTS(SELECT 1 FROM directories d WHERE d.share_id=s.id)
+        AND NOT EXISTS(SELECT 1 FROM deliveries v JOIN files f ON f.id=v.file_id WHERE f.share_id=s.id) ORDER BY s.created_at,s.id`, accountId, outputRoot);
+      for (const row of rows) this.run("UPDATE shares SET output_root=? WHERE id=?", outputRoot, row.id);
+      return rows.map(row => row.id);
+    });
+  }
   shareTitle(accountId: string, shareId: string): string | null {
     this.share(accountId, shareId); return this.get<{ title: string | null }>("SELECT title FROM shares WHERE id=?", shareId)?.title ?? null;
   }

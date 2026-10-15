@@ -169,16 +169,23 @@ test("手动提交与剪贴板同一规则，不与先前输入拼接，也不�
   } finally { abort.abort(); await running; await f.close(); }
 });
 
-test("修改下载目录只影响之后接收的分享，不可用目录被拒绝", async () => {
+test("修改下载目录：新分享与尚未开始的分享改用新目录，已开始的分享保留原目录，不可用目录被拒绝", async () => {
   const f = await storeFixture(); const next = join(f.root, "新目录"); await mkdir(next);
+  // f.share 已在本地开始（根目录已打开）；waiting 只接收过、本地还没有任何内容。
+  f.store.bindRoot("account", f.share.id, { volume: "volume", file: "root" });
+  const waiting = f.store.accept("account", "synthetic-waiting", f.root, "reference-waiting");
+  const events: RuntimeEvent[] = [];
   const session = new RuntimeSession(f.store, "account", fakeEngine(async () => { await Bun.sleep(5); return false; }).engine, f.receiver, fakeClipboard().clipboard);
+  session.subscribe(event => events.push(event));
   const abort = new AbortController(); const running = session.run(abort.signal);
   try {
     expect(await session.command({ kind: "setOutputRoot", path: join(f.root, "missing") })).toEqual({ ok: false, reason: "output_unavailable" });
-    expect((await session.command({ kind: "setOutputRoot", path: next })).ok).toBe(true);
+    expect(await session.command({ kind: "setOutputRoot", path: next })).toEqual({ ok: true, ids: [waiting.id], issues: [] });
     expect(f.store.config("output_root")).toBe(await realpath(next));
+    expect(events.find(event => event.type === "command" && event.reason === "setOutputRoot")?.count).toBe(1);
     const result = await session.command({ kind: "submitText", text: "https://mypikpak.com/s/synthetic-next" });
     expect(result.ok && f.store.share("account", result.ids[0]!).outputRoot).toBe(await realpath(next));
+    expect(f.store.share("account", waiting.id).outputRoot).toBe(await realpath(next));
     expect(f.store.share("account", f.share.id).outputRoot).toBe(f.root);
   } finally { abort.abort(); await running; await f.close(); }
 });
