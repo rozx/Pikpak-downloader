@@ -82,16 +82,18 @@ export async function downloadSegmented(options: SegmentedDownload): Promise<{ g
 
   // 保存周期（决策 4）：取区间快照 → sync → 把快照中已完成的队头分块读回、核对并并入前缀 → 一条语句写入任务库。
   // 快照只包含写入已返回的数据，之后的写入不在本次声明之内。同一时刻只有一次保存，期间的请求合并为下一次。
-  const saveOnce = async () => {
+  // fold 为 false 时只保存区间、不读回并入前缀：停止时用它，多个文件同时停止也不必各自读回最多 64 MiB；
+  // 区间留在检查点里，下次启动时核对。停止开始后，正在进行的并入也在下一个分块处结束。
+  const saveOnce = async (fold = true) => {
     unsaved = 0n;
     const snapshot = plan.ranges();
     await local.sync();
-    for (let head = plan.head(); head; head = plan.head()) {
+    for (let head = plan.head(); fold && head && !combined.aborted; head = plan.head()) {
       const entry = snapshot.find(range => range.offset === head!.start);
       if (!entry || entry.bytes !== chunkLength(head)) break;
       // 先读进内存再核对，摘要不符时顺序哈希器不需要回滚。
       const parts: Uint8Array[] = [];
-      await readInto(local, head.start, head.end, bytes => { parts.push(bytes); });
+      try { await readInto(local, head.start, head.end, bytes => { parts.push(bytes); }, combined); } catch { break; }
       const data = Buffer.concat(parts);
       snapshot.splice(snapshot.indexOf(entry), 1);
       if (createHash("sha256").update(data).digest("hex") !== entry.sha256) { plan.discard(head); break; }
@@ -187,7 +189,7 @@ export async function downloadSegmented(options: SegmentedDownload): Promise<{ g
       store.checkpoint(accountId, file.id, 0n, new ContentHasher(file.size).prefixDigest(), { mode: "sequential", chunk: CHUNK_SIZE, ranges: [] });
       throw failure;
     }
-    if (store.file(accountId, file.id).state === "downloading") await saveOnce().catch(() => {});
+    if (store.file(accountId, file.id).state === "downloading") await saveOnce(false).catch(() => {});
     throw signal.aborted ? signal.reason ?? Error("interrupted") : failure;
   }
   await (saving as Promise<void> | null);

@@ -168,3 +168,21 @@ test("连接停滞超过时限后换连接继续，最终完成", async () => {
   expect(server.requests.filter(request => request.start === S)).toHaveLength(2);
 });
 
+
+test("停止时只保存区间、不再读回并入前缀；未并入的分块在下次启动时核对", async () => {
+  const content = bytes(8 * S, 17), f = await setup(content, cleanups);
+  let stopping = false, readsAfterStop = 0;
+  class CountingFile extends MemoryFile {
+    override async read(position: bigint, length: number) { if (stopping) readsAfterStop++; return super.read(position, length); }
+  }
+  const local = new CountingFile(), abort = new AbortController();
+  const job = runSegmented(f, local, cdn(content).http, { signal: abort.signal,
+    progress: value => { if (!stopping && value >= BigInt(5 * S)) { stopping = true; abort.abort(Error("user-stop")); } } });
+  expect((await rejection(job.result)).message).toBe("user-stop");
+  expect(readsAfterStop).toBe(0);
+  const stored = f.store.delivery("account", f.file.id)!;
+  expect(stored.ranges?.ranges.length ?? 0).toBeGreaterThan(0);
+  const { plan } = await reconcileSegments(f.store, "account", f.file, local, 8);
+  expect(plan.prefix).toBe(stored.checkpoint); expect(plan.ranges()).toHaveLength(stored.ranges!.ranges.length);
+  expect(await runSegmented(f, local, cdn(content).http).result).toEqual(f.digest);
+});
