@@ -85,11 +85,15 @@ checking ─┬─ 执行锁被占用 ──────────────
 | 排队、已取消、次要信息 | · ⊘ | 灰 |
 | 标题栏、选中行 | — | 蓝底 |
 
+选中行的蓝底上，原有的灰、蓝、品红、红色文字对比不足，转存中的蓝色更与背景相同。选中时改用一组亮色：正文、次要信息、转存、扫描与失败文字为亮白或白色，完成、下载、等待与按键提示分别为亮绿、亮青、亮黄；状态仍由图标与文字区分。
+
+标题栏左侧为程序名与版本，右侧为登录、云盘、本地剩余与剪贴板，右端与分隔线对齐；宽度不足时依次省略本地剩余与云盘。按键提示上方的分隔线右侧嵌入作者与项目地址，不额外占用行；设置页底部的“关于”也显示同一组信息。启动检查、登录、已有实例与失败页显示双色字符标志（实心块为青色、阴影为蓝色，43 列 × 6 行）、版本、作者与项目地址；窗口不足 60×24 时改为单行标题。启动检查画面至少保留 0.8 秒，避免标志一闪而过。版本、作者与项目地址统一取自 `package.json`。
+
 列宽按终端显示宽度计算，过长名称中间省略。窗口小于 60×15 时只显示放大提示。文件名只显示在本机屏幕上，不写入日志；提取码和凭据从不显示。
 
 ### 8. 退出与终端恢复
 
-q 与 Ctrl+C 触发有界停止并显示"正在停止并保存进度"；停止期间再次 Ctrl+C 立即退出。Ink 卸载之外，另在进程退出、`SIGTERM`、`SIGHUP` 和未处理异常时写入恢复序列（退出备用屏幕、显示光标、关闭原始输入模式），然后在主屏幕打印会话摘要或 `publicError` 的用户说明。
+q 与 Ctrl+C 先弹出退出确认（与取消共用确认框）；按 y 或在确认框中再按 Ctrl+C 才触发有界停止并显示"正在停止并保存进度"，n 或 Esc 返回；停止期间再次 Ctrl+C 立即退出，连按三次仍可强制退出。启动检查、登录与目录页还没有运行中的任务，Ctrl+C 直接退出。Ink 卸载之外，另在进程退出、`SIGTERM`、`SIGHUP` 和未处理异常时写入恢复序列（退出备用屏幕、显示光标、关闭原始输入模式），然后在主屏幕打印会话摘要或 `publicError` 的用户说明。
 
 ## Risks / Trade-offs
 
@@ -138,6 +142,10 @@ windows-x64 产物已在 Claude Code 终端面板启动：中日韩名称按显�
 
 在 Claude Code 终端面板（170×86）中以真实账号运行 `bun src/cli.ts`：启动检查后直接进入主面板；之前停在 21% 的真实分享文件从断点继续下载，进度、速度（约 264 KB/s）与剩余时间原地刷新，云盘容量在首次查询后显示；Ctrl+C 有界停止，退出后恢复原屏幕并打印"已停止，进度已保存。本次完成 0 个文件；还有 1 个未完成，下次启动会继续。"。编译后的 windows-x64 独立产物在另一实例持有执行锁时显示"已有实例正在使用任务库"。Windows Terminal 与传统控制台中的完整按键演练仍属 7.1。
 
+### 界面润色预览（2026-10-15）
+
+`bun scripts/preview-tui.tsx` 用模拟数据渲染正式界面（不读写任务库）。在 Claude Code 终端面板（170 列）中：启动画面的双色标志、版本、作者、项目地址与检查进度居中显示；主面板标题栏左侧为程序名与版本，状态项右端与分隔线、分享行目录对齐；作者与项目地址嵌在按键提示上方的分隔线右端。Ctrl+C 弹出“退出程序”确认框，再按一次 Ctrl+C 退出并恢复原屏幕。颜色观感由 8.5 交用户确认。
+
 ## 规格核对
 
 | 需求 | 场景 | 证据 |
@@ -148,8 +156,8 @@ windows-x64 产物已在 Claude Code 终端面板启动：中日韩名称按显�
 | terminal-ui 面板内任务操作 | 取消下载中文件；重试失败文件；打开下载目录 | `tests/tui-screens.test.tsx`；`tests/runtime-session.test.ts`（取消后断点与副本保留）；`tests/tui-live.test.ts`（目录参数不经 shell）；实机打开随 7.1、7.2 |
 | terminal-ui 粘贴分享输入 | 带提取码的多行文本；无法识别 | `tests/tui-screens.test.tsx`（括号粘贴不提交、预览）；`tests/runtime-session.test.ts` |
 | terminal-ui 设置页与持久化偏好 | 修改下载目录；关闭剪贴板监听 | `tests/runtime-session.test.ts`（新目录只影响之后的分享、监听开关）；`tests/tui-screens.test.tsx` |
-| terminal-ui 颜色、图标与可读性 | 关闭颜色；中文文件名 | `tests/tui-format.test.ts`（`NO_COLOR`、按显示宽度省略）；`tests/tui-screens.test.tsx`（列对齐） |
-| terminal-ui 退出与终端恢复 | 正常退出；界面异常 | `tests/tui-terminal.test.ts`（异常、拒绝、信号、退出只恢复一次）；`tests/tui-screens.test.tsx`（两段式 Ctrl+C）；Windows 实机冒烟 |
+| terminal-ui 颜色、图标与可读性 | 关闭颜色；选中行可读；中文文件名 | `tests/tui-format.test.ts`（`NO_COLOR`、按显示宽度省略、选中色与背景对比）；`tests/tui-screens.test.tsx`（列对齐） |
+| terminal-ui 退出与终端恢复 | 正常退出；界面异常 | `tests/tui-terminal.test.ts`（异常、拒绝、信号、退出只恢复一次）；`tests/tui-screens.test.tsx`（q 与 Ctrl+C 的退出确认、停止期间立即退出）；Windows 实机冒烟 |
 | cli-runtime 前台运行及正常退出 | 用户中断；下次继续；纯文本不刷屏 | `tests/lifecycle.test.ts`；`tests/interruption.test.ts`（断点续传）；`tests/watch-output.test.ts`；实机从断点继续 |
 | clipboard-intake 前台剪贴板监听 | 启动时已有分享；暂停期间接收；监听已关闭 | `tests/intake.test.ts`；`tests/runtime-session.test.ts`（用户暂停期间接收、关闭后不读取） |
 | clipboard-intake 手动粘贴输入 | 与剪贴板相同文本；只粘贴提取码 | `tests/runtime-session.test.ts`（合并并重扫、不拼接、不重复接收剪贴板）；`tests/tui-screens.test.tsx` |

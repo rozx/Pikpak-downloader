@@ -13,6 +13,7 @@ bun install --frozen-lockfile
 bun run check
 bun run dev --help
 bun run build bun-darwin-arm64 bun-windows-x64
+bun scripts/preview-tui.tsx   # 用模拟数据预览全屏界面，不读写任务库
 ```
 
 macOS 原生构建需要 Xcode Command Line Tools 和 Node-API 头文件；可用 `NODE_API_HEADERS` 指定头文件目录。发行二进制内含运行时与所需适配，使用者无需安装这些开发工具。
@@ -33,7 +34,7 @@ macOS 原生构建需要 Xcode Command Line Tools 和 Node-API 头文件；可�
 | r / c | 重试；取消（需确认，保留本地文件、断点和云端副本） |
 | p | 暂停或继续整个队列（重启后保持） |
 | o / a / s | 打开下载目录；粘贴分享文本；设置下载目录与剪贴板监听 |
-| q / Ctrl+C | 停止并保存进度；停止期间再按 Ctrl+C 立即退出 |
+| q / Ctrl+C | 退出确认：y 或再按 Ctrl+C 停止并保存进度，n / Esc 返回；停止期间再按 Ctrl+C 立即退出 |
 
 窗口至少需要 60×15；设置 `NO_COLOR` 可关闭颜色。输出被重定向或在脚本中运行时不会进入界面，可以使用下面的子命令。
 

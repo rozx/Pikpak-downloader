@@ -6,6 +6,7 @@ import { displayPath, fileName, formatBytes, truncateMiddle } from "./format";
 import { explain, fileLook } from "./view-model";
 import { Keys, Rule, Title, boxHighlight, textHighlight } from "./parts";
 import type { Size } from "./main-panel";
+import { about } from "../about";
 
 const copyStates: Record<string, string> = { retained: "保留中 · 交付完成后才可能被回收", deleting: "回收中", deleted: "已回收", protected: "受保护 · 不会自动回收" };
 export function DetailPage({ file, shareTitle, targetPath, userPaused, size, theme }: {
@@ -39,27 +40,38 @@ export function DetailPage({ file, shareTitle, targetPath, userPaused, size, the
 export function SettingsPage({ outputRoot, clipboardOn, selected, editing, draft, error, size, theme }: {
   outputRoot: string | null; clipboardOn: boolean; selected: number; editing: boolean; draft: string; error: string | null; size: Size; theme: Theme;
 }) {
-  const item = (index: number, label: string, value: React.ReactNode, note: string) => (
-    <Box key={label} flexDirection="column">
-      <Box {...boxHighlight(theme.selection, selected === index)}>
-        <Text {...theme.paint("strong")}>{selected === index ? "> " : "  "}</Text>
-        <Box width={14} flexShrink={0}><Text {...theme.paint(selected === index ? "strong" : "text")} {...textHighlight(theme.selection, selected === index)}>{label}</Text></Box>
-        {value}
+  const item = (index: number, label: string, value: (on: boolean) => React.ReactNode, note: string) => {
+    const on = selected === index;
+    return (
+      <Box key={label} flexDirection="column">
+        <Box {...boxHighlight(theme.selection, on)}>
+          <Text {...theme.paint("key", on)} bold>{on ? "> " : "  "}</Text>
+          <Box width={14} flexShrink={0}><Text {...theme.paint("text", on)} bold={on} {...textHighlight(theme.selection, on)}>{label}</Text></Box>
+          {value(on)}
+        </Box>
+        <Box marginLeft={16}><Text {...theme.paint("muted")}>{note}</Text></Box>
       </Box>
-      <Box marginLeft={16}><Text {...theme.paint("muted")}>{note}</Text></Box>
-    </Box>
-  );
+    );
+  };
   return (
     <Box flexDirection="column" height={size.rows} paddingX={1}>
       <Title text="设置" theme={theme} />
       <Rule width={size.columns - 2} theme={theme} />
       <Box flexDirection="column" flexGrow={1} paddingTop={1} gap={1}>
-        {item(0, "下载目录", editing
-          ? <Text {...theme.paint("strong")}>{draft}<Text {...theme.paint("key")}>▌</Text></Text>
-          : <Text {...theme.paint("strong")}>{truncateMiddle(outputRoot ?? "未设置", size.columns - 22)}</Text>,
+        {item(0, "下载目录", on => editing
+          ? <Text {...theme.paint("strong", on)}>{draft}<Text {...theme.paint("key", on)}>▌</Text></Text>
+          : <Text {...theme.paint("strong", on)}>{truncateMiddle(outputRoot ?? "未设置", size.columns - 22)}</Text>,
           editing ? "输入或粘贴目录后按 Enter 保存，Esc 放弃" : "仅对新接收的分享生效，已有分享沿用原目录")}
-        {item(1, "剪贴板监听", <Text {...theme.paint(clipboardOn ? "done" : "muted")}>{clipboardOn ? "● 开" : "○ 关"}</Text>, "关闭后只能用 a 粘贴分享文本")}
+        {item(1, "剪贴板监听", on => <Text {...theme.paint(clipboardOn ? "done" : "muted", on)}>{clipboardOn ? "● 开" : "○ 关"}</Text>, "关闭后只能用 a 粘贴分享文本")}
         {error && <Text {...theme.paint("error")}>✗ {error}</Text>}
+        <Box flexGrow={1} />
+        <Box>
+          <Box width={16} flexShrink={0}><Text {...theme.paint("muted")}>  关于</Text></Box>
+          <Box flexDirection="column">
+            <Text><Text {...theme.paint("strong")}>{about.name}</Text><Text {...theme.paint("muted")}>  v{about.version}  ·  作者 </Text><Text {...theme.paint("text")}>{about.author}</Text></Text>
+            <Text {...theme.paint("active")}>{about.homepage}</Text>
+          </Box>
+        </Box>
       </Box>
       <Rule width={size.columns - 2} theme={theme} />
       <Keys items={editing ? [["Enter", "保存"], ["Esc", "放弃"]] : [["↑↓", "选择"], ["Enter", "修改"], ["Space", "切换"], ["Esc", "返回"]]} theme={theme} />
@@ -89,13 +101,13 @@ export function PasteBox({ draft, preview, outputRoot, message, theme, width }: 
 }
 
 export const CONFIRM_LINES = 7;
-export function ConfirmDialog({ title, detail, theme }: { title: string; detail: string; theme: Theme }) {
+export function ConfirmDialog({ heading, title, detail, confirm, theme }: { heading: string; title: string; detail: string; confirm: string; theme: Theme }) {
   return (
     <Box marginLeft={10} borderStyle="round" {...theme.enabled ? { borderColor: "yellow" } : {}} flexDirection="column" paddingX={2} width={64} height={CONFIRM_LINES}>
-      <Text {...theme.paint("key")} bold>取消任务</Text>
+      <Text {...theme.paint("key")} bold>{heading}</Text>
       <Text {...theme.paint("text")} wrap="truncate-end">{title}</Text>
       <Text {...theme.paint("muted")}>{detail}</Text>
-      <Text><Text {...theme.paint("key")} bold>y</Text><Text {...theme.paint("text")}> 确认取消    </Text><Text {...theme.paint("key")} bold>n</Text><Text {...theme.paint("text")}> 返回</Text></Text>
+      <Text><Text {...theme.paint("key")} bold>y</Text><Text {...theme.paint("text")}> {confirm}    </Text><Text {...theme.paint("key")} bold>n</Text><Text {...theme.paint("text")}> 返回</Text></Text>
     </Box>
   );
 }

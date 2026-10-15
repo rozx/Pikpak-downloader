@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { AppError, publicError } from "./errors";
-import { version } from "../package.json";
+import { about } from "./about";
 import { join, resolve } from "node:path";
 import { access, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -14,8 +14,8 @@ import { clipboardWorker } from "./intake/clipboard-worker";
 import { watch } from "./runtime/watch";
 import { interruptible } from "./runtime/lifecycle";
 
-const help = `PikPak Downloader ${version}（开发中）
-把 PikPak 云盘作为下载中转空间。
+const help = `${about.name} ${about.version}（开发中）
+把 PikPak 云盘作为下载中转空间。作者 ${about.author} · ${about.homepage}
 
 用法：pikpak-downloader              在交互终端中打开全屏界面（检查登录与下载目录后开始监听）
       pikpak-downloader <命令> [选项] 供脚本或非交互场景使用
@@ -54,7 +54,7 @@ export async function runCli(args: string[]): Promise<void> {
   if (!args.length || (args.length === 1 && ["--help", "-h", "help"].includes(args[0]!))) {
     console.log(help); return;
   }
-  if (args.length === 1 && ["--version", "-v"].includes(args[0]!)) { console.log(version); return; }
+  if (args.length === 1 && ["--version", "-v"].includes(args[0]!)) { console.log(about.version); return; }
   const command = args[0];
   if (command === "status") {
     if (args.length > 2) throw new AppError("invalid_input");

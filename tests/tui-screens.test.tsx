@@ -1,9 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import { TuiApp } from "../src/tui/app";
-import { createTheme } from "../src/tui/theme";
+import { createTheme, type Theme, type Tone } from "../src/tui/theme";
 import { displayWidth } from "../src/tui/format";
-import type { Size } from "../src/tui/main-panel";
+import { RowLine, type Size } from "../src/tui/main-panel";
+import { Rule, creditLabel } from "../src/tui/parts";
+import { buildRows } from "../src/tui/view-model";
+import { about } from "../src/about";
 import { FakeController, keys, mockSnapshot, settle, stripAnsi } from "./fixtures/tui";
 
 const mounted: Array<() => void> = [];
@@ -100,12 +103,22 @@ test("折叠与展开分享，Enter 在分享行切换折叠", async () => {
   await press(keys.enter); expect(frame()).not.toContain("episode02.mkv");
 });
 
-test("q 与 Ctrl+C 有界停止，停止期间再次 Ctrl+C 立即退出", async () => {
+test("q 与 Ctrl+C 先确认再停止：y 或再按 Ctrl+C 确认，n 与 Esc 返回；停止期间再按 Ctrl+C 立即退出", async () => {
   const { controller, frame, press } = mount(); await settle();
-  await press("q", keys.ctrlC); expect(controller.stops).toBe(2); expect(controller.forced).toBe(0);
+  await press("q");
+  expect(frame()).toContain("退出程序"); expect(frame()).toContain("停止下载并退出？"); expect(frame()).toContain("y 停止并退出");
+  expect(controller.stops).toBe(0);
+  await press("n"); expect(frame()).not.toContain("退出程序"); expect(controller.stops).toBe(0);
+  await press("q", keys.escape); expect(frame()).not.toContain("退出程序"); expect(controller.stops).toBe(0);
+  await press(keys.ctrlC); expect(frame()).toContain("停止下载并退出？"); expect(controller.stops).toBe(0);
+  await press("n"); expect(frame()).not.toContain("退出程序"); expect(controller.stops).toBe(0);
+  await press(keys.enter, keys.ctrlC); expect(frame()).toContain("停止下载并退出？");
+  await press(keys.escape); expect(frame()).toContain("Enter 详情"); expect(controller.stops).toBe(0);
+  await press("q", "y"); expect(controller.stops).toBe(1); expect(frame()).not.toContain("退出程序");
+  await press(keys.ctrlC, keys.ctrlC); expect(controller.stops).toBe(2); expect(controller.forced).toBe(0); expect(frame()).not.toContain("退出程序");
   controller.update({ stopping: true }); await settle();
   expect(frame()).toContain("正在停止并保存进度…（再按 Ctrl+C 立即退出）");
-  await press(keys.ctrlC); expect(controller.forced).toBe(1);
+  await press(keys.ctrlC); expect(controller.forced).toBe(1); expect(controller.stops).toBe(2);
 });
 
 test("详情页显示路径、原因与建议、断点、副本和本地目标", async () => {
@@ -147,3 +160,58 @@ test("粘贴框：多行粘贴不提交并实时预览；只粘贴提取码提�
   expect(frame()).toContain("未识别到分享链接，未接收任何分享");
   await press(keys.escape); expect(frame()).not.toContain("粘贴分享文本");
 });
+
+test("标题栏左侧程序名与版本，右端与分隔线对齐，窄窗口依次省略本地剩余与云盘", async () => {
+  // ink-testing-library 的虚拟终端固定 100 列，更宽的布局由实机复看覆盖。
+  const cases: Array<[number, string[], string[]]> = [
+    [100, ["云盘 21 GB / 10 TB", "本地剩余 412 GB"], []],
+    [80, ["云盘 21 GB / 10 TB"], ["本地剩余"]],
+    [60, [], ["云盘", "本地剩余"]],
+  ];
+  for (const [columns, shown, hidden] of cases) {
+    const { frame } = mount(new FakeController(), { columns, rows: 24 }); await settle();
+    const [header = "", rule = ""] = frame().split("\n");
+    expect(header).toContain(`${about.name}   v${about.version}`);
+    expect(header).toContain("● 已登录"); expect(header).toContain("剪贴板 ● 监听中");
+    for (const part of shown) expect(header).toContain(part);
+    for (const part of hidden) expect(header).not.toContain(part);
+    expect(displayWidth(header.trimEnd())).toBe(displayWidth(rule.trimEnd()));
+    expect(header.trimEnd().endsWith("● 监听中")).toBe(true);
+  }
+});
+
+test("按键提示上方的分隔线嵌入作者与项目地址，放不下时只画分隔线", async () => {
+  const { frame } = mount(); await settle();
+  const lines = frame().split("\n");
+  const credit = lines.find(line => line.includes(about.site)) ?? "";
+  expect(credit).toContain(`作者 ${about.author} · ${about.site} ──`);
+  expect(displayWidth(credit.trimEnd())).toBe(displayWidth((lines[1] ?? "").trimEnd()));
+  expect(lines[lines.indexOf(credit) + 1]).toContain("q 退出");
+  const narrow = render(<Rule width={40} theme={createTheme({ NO_COLOR: "1" })} label={creditLabel} />); mounted.push(narrow.unmount);
+  expect(stripAnsi(narrow.lastFrame() ?? "")).toBe("─".repeat(40));
+});
+
+test("设置页底部显示版本、作者与项目地址", async () => {
+  const { frame, press } = mount(); await settle();
+  await press("s");
+  const text = frame();
+  expect(text).toContain("关于"); expect(text).toContain(`${about.name}  v${about.version}  ·  作者 ${about.author}`); expect(text).toContain(about.homepage);
+});
+
+test("选中行的全部文字与进度条使用选中调色板，未选中行不使用", () => {
+  const base = createTheme({});
+  const calls: Array<[Tone, boolean]> = [];
+  const theme: Theme = { ...base, paint: (tone, selected = false) => { calls.push([tone, selected]); return base.paint(tone, selected); } };
+  const snapshot = mockSnapshot();
+  const rows = buildRows({ shares: snapshot.shares, files: snapshot.files, expanded: {}, userPaused: false });
+  const picked = [rows.find(row => row.kind === "share"), ...["f_2", "f_4", "f_5"].map(id => rows.find(row => row.kind === "file" && row.file.id === id))];
+  for (const row of picked) {
+    for (const selected of [true, false]) {
+      calls.length = 0;
+      const app = render(<RowLine row={row!} selected={selected} snapshot={snapshot} theme={theme} columns={120} />); app.unmount();
+      expect(calls.length).toBeGreaterThan(2);
+      expect(calls.every(([, flag]) => flag === selected)).toBe(true);
+    }
+  }
+});
+

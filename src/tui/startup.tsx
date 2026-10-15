@@ -5,6 +5,7 @@ import type { TuiController } from "./controller";
 import { createTheme, type Theme } from "./theme";
 import { explain } from "./view-model";
 import { Keys, Rule, Title } from "./parts";
+import { Brand } from "./brand";
 import { TuiApp } from "./app";
 import type { Size } from "./main-panel";
 
@@ -24,14 +25,22 @@ type Phase = { kind: "checking" } | { kind: "busy" } | { kind: "failed"; message
   | { kind: "main"; controller: TuiController };
 const spinner = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 const reasonOf = (error: unknown) => error instanceof AppError ? error.code : "operation_failed";
+// 完整标志连同下方提示至少需要 60×24，放不下时改为单行标题。
+const BRAND_COLUMNS = 60, BRAND_ROWS = 24;
 
 // 启动检查：执行实例 → 登录会话 → 下载目录 → 主面板。界面内不收集账号密码。
-export function StartupApp({ deps, theme = createTheme(), size: fixedSize }: { deps: StartupDeps; theme?: Theme; size?: Size }) {
+// 启动检查画面至少保留 splashMs，避免标志一闪而过。
+export function StartupApp({ deps, theme = createTheme(), size: fixedSize, splashMs = 800 }: { deps: StartupDeps; theme?: Theme; size?: Size; splashMs?: number }) {
   const windowSize = useWindowSize();
   const size = fixedSize ?? windowSize;
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
   const [tick, setTick] = useState(0);
   const abort = useRef<AbortController | null>(null);
+  const shownAt = useRef(Date.now());
+  const splash = async () => {
+    const left = splashMs - (Date.now() - shownAt.current);
+    if (left > 0) await new Promise(resolve => setTimeout(resolve, left));
+  };
 
   const startMain = async (account: string) => {
     setPhase({ kind: "checking" });
@@ -52,15 +61,17 @@ export function StartupApp({ deps, theme = createTheme(), size: fixedSize }: { d
     void (async () => {
       try {
         const account = await deps.account();
+        await splash();
         if (account) await checkRoot(account); else setPhase({ kind: "login", waiting: false, messages: [], error: null });
-      } catch (error) { setPhase({ kind: "failed", message: explain(reasonOf(error)).reason }); }
+      } catch (error) { await splash(); setPhase({ kind: "failed", message: explain(reasonOf(error)).reason }); }
     })();
   }, []);
+  const spinning = phase.kind === "checking" || phase.kind === "login" && phase.waiting;
   useEffect(() => {
-    if (phase.kind !== "login" || !phase.waiting) return;
+    if (!spinning) return;
     const timer = setInterval(() => setTick(value => value + 1), 80);
     return () => clearInterval(timer);
-  }, [phase.kind === "login" && phase.waiting]);
+  }, [spinning]);
 
   const authorize = async () => {
     const controller = new AbortController(); abort.current = controller;
@@ -98,11 +109,15 @@ export function StartupApp({ deps, theme = createTheme(), size: fixedSize }: { d
     { isActive: phase.kind === "setup" });
 
   if (phase.kind === "main") return <TuiApp controller={phase.controller} theme={theme} {...fixedSize ? { size: fixedSize } : {}} />;
-  const centered = (children: React.ReactNode) => <Box flexDirection="column" height={size.rows} alignItems="center" justifyContent="center" gap={1}>{children}</Box>;
-  if (phase.kind === "checking") return centered(<Text {...theme.paint("muted")}>正在检查登录状态与下载目录…</Text>);
+  const compact = size.columns < BRAND_COLUMNS || size.rows < BRAND_ROWS;
+  const centered = (children: React.ReactNode) => (
+    <Box flexDirection="column" height={size.rows} alignItems="center" justifyContent="center" gap={1}>
+      <Brand theme={theme} compact={compact} />{children}
+    </Box>
+  );
+  if (phase.kind === "checking") return centered(<Text {...theme.paint("muted")}><Text {...theme.paint("active")}>{spinner[tick % spinner.length]}</Text> 正在检查登录状态与下载目录…</Text>);
   if (phase.kind === "busy" || phase.kind === "failed") {
     return centered(<>
-      <Text {...theme.paint("active")} bold>PikPak Downloader</Text>
       {phase.kind === "busy"
         ? <Box flexDirection="column" alignItems="center"><Text {...theme.paint("warning")}>已有实例正在使用任务库（watch 或另一个界面）。</Text><Text {...theme.paint("muted")}>请先退出它；也可以在另一个终端用 status 只读查看。</Text></Box>
         : <Text {...theme.paint("error")}>{phase.message}</Text>}
@@ -111,7 +126,6 @@ export function StartupApp({ deps, theme = createTheme(), size: fixedSize }: { d
   }
   if (phase.kind === "login") {
     return centered(<>
-      <Text {...theme.paint("active")} bold>PikPak Downloader</Text>
       <Box flexDirection="column" alignItems="center">
         <Text {...theme.paint("warning")}>尚未登录</Text>
         <Text {...theme.paint("text")}>按 <Text {...theme.paint("key")} bold>Enter</Text> 在浏览器中打开 PikPak 官方授权页</Text>

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { displayPath, displayWidth, fileName, formatBytes, formatDuration, formatSpeed, truncateMiddle } from "../src/tui/format";
 import { SpeedMeter } from "../src/tui/speed";
 import { createTheme } from "../src/tui/theme";
+import { LOGO, LOGO_WIDTH } from "../src/tui/brand";
 
 test("大小、速度与时长使用紧凑的中文格式", () => {
   expect([0n, 512n, 1024n, 1536n, 412n * 1048576n, 2254857830n, 21n * 1024n ** 3n, 10n * 1024n ** 4n].map(formatBytes))
@@ -48,3 +49,23 @@ test("主题使用标准 16 色，NO_COLOR 关闭颜色并以反色标示选中"
   expect(plain.enabled).toBe(false); expect(plain.tone("error")).toBe(undefined); expect(plain.selection).toEqual({ inverse: true });
   expect(createTheme({ NO_COLOR: "" }).enabled).toBe(true);
 });
+
+test("选中调色板在蓝底上不使用蓝、品红、红、灰等低对比色，NO_COLOR 下不输出颜色", () => {
+  const colored = createTheme({});
+  const tones = ["done", "active", "transfer", "scan", "warning", "error", "muted", "text", "strong", "key"] as const;
+  const weak = ["blue", "blueBright", "magenta", "magentaBright", "red", "redBright", "gray", "black", "blackBright"];
+  for (const tone of tones) {
+    const painted = colored.paint(tone, true);
+    expect("color" in painted).toBe(true);
+    expect(weak).not.toContain((painted as { color: string }).color);
+  }
+  expect(colored.paint("transfer")).toEqual({ color: "blue" });
+  for (const tone of tones) expect(createTheme({ NO_COLOR: "1" }).paint(tone, true)).toEqual({});
+});
+
+test("标志各行显示宽度一致且不超过 60 列", () => {
+  expect(LOGO).toHaveLength(6);
+  for (const line of LOGO) expect(displayWidth(line)).toBe(LOGO_WIDTH);
+  expect(LOGO_WIDTH).toBeLessThanOrEqual(60);
+});
+

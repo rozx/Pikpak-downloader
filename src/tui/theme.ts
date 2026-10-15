@@ -4,16 +4,23 @@ const palette: Record<Tone, string> = {
   done: "green", active: "cyan", transfer: "blue", scan: "magenta", warning: "yellow", error: "red",
   muted: "gray", text: "white", strong: "whiteBright", key: "yellowBright",
 };
+// 选中行是蓝底：灰、蓝、品红、红色文字在蓝底上难以辨认，改用亮白；其余状态改用亮色。
+const onSelection: Record<Tone, string> = {
+  done: "greenBright", active: "cyanBright", transfer: "whiteBright", scan: "whiteBright", warning: "yellowBright", error: "whiteBright",
+  muted: "white", text: "whiteBright", strong: "whiteBright", key: "yellowBright",
+};
+export const SELECTION_BACKGROUND = "blue";
 export type Highlight = { backgroundColor: string; color?: string } | { inverse: true };
-export type Theme = { enabled: boolean; tone(tone: Tone): string | undefined; paint(tone: Tone): { color: string } | Record<string, never>;
+export type Theme = { enabled: boolean; tone(tone: Tone): string | undefined; paint(tone: Tone, selected?: boolean): { color: string } | Record<string, never>;
   selection: Highlight; title: Highlight; banner: Highlight };
 
 // NO_COLOR 存在且非空时不输出颜色；选中行与标题改用反色，状态仍由图标与文字区分。
 export function createTheme(env: Record<string, string | undefined> = process.env): Theme {
   const enabled = !env.NO_COLOR;
   return {
-    enabled, tone: tone => enabled ? palette[tone] : undefined, paint: tone => enabled ? { color: palette[tone] } : {},
-    selection: enabled ? { backgroundColor: "blue" } : { inverse: true },
+    enabled, tone: tone => enabled ? palette[tone] : undefined,
+    paint: (tone, selected = false) => enabled ? { color: (selected ? onSelection : palette)[tone] } : {},
+    selection: enabled ? { backgroundColor: SELECTION_BACKGROUND } : { inverse: true },
     title: enabled ? { backgroundColor: "blue", color: "whiteBright" } : { inverse: true },
     banner: enabled ? { backgroundColor: "yellow", color: "black" } : { inverse: true },
   };

@@ -7,7 +7,7 @@ import { MainPanel, MIN_COLUMNS, MIN_ROWS, panelLayout, type Size } from "./main
 import { CONFIRM_LINES, ConfirmDialog, DetailPage, PASTE_BOX_LINES, PasteBox, SettingsPage } from "./pages";
 
 type Screen = { kind: "main" } | { kind: "detail"; fileId: string } | { kind: "settings" } | { kind: "paste" }
-  | { kind: "confirm"; id: string; title: string; back: Screen };
+  | { kind: "confirm"; id: string; title: string; back: Screen } | { kind: "quit" };
 
 export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: { controller: TuiController; theme?: Theme; size?: Size }) {
   const windowSize = useWindowSize();
@@ -25,7 +25,7 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   const found = rows.findIndex(row => row.key === selectedKey);
   const selected = found >= 0 ? found : Math.min(Math.max(0, rows.findIndex(row => row.kind === "file")), Math.max(0, rows.length - 1));
   const row = rows[selected];
-  const overlayLines = screen.kind === "confirm" ? CONFIRM_LINES : screen.kind === "paste" ? PASTE_BOX_LINES : 0;
+  const overlayLines = screen.kind === "confirm" || screen.kind === "quit" ? CONFIRM_LINES : screen.kind === "paste" ? PASTE_BOX_LINES : 0;
   const { listHeight } = panelLayout(size, snapshot, overlayLines);
   const effectiveOffset = scrollOffset(offset, selected, listHeight, rows.length);
   useEffect(() => { if (effectiveOffset !== offset) setOffset(effectiveOffset); }, [effectiveOffset, offset]);
@@ -50,8 +50,14 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
     if (!result.ok) controller.note({ icon: "✗", tone: "error", text: `无法打开目录：${explain(result.reason).reason}` });
   };
 
-  // Ctrl+C 两段式：第一次有界停止并保存进度，停止期间再次按下立即退出。
-  useInput((input, key) => { if (key.ctrl && input === "c") { if (snapshot.stopping) controller.forceExit(); else controller.stop(); } });
+  const quit = () => { setScreen({ kind: "main" }); controller.stop(); };
+  // Ctrl+C 与 q 一样先确认；确认框中再按 Ctrl+C 视为确认，停止期间再按立即退出。
+  useInput((input, key) => {
+    if (!(key.ctrl && input === "c")) return;
+    if (snapshot.stopping) controller.forceExit();
+    else if (screen.kind === "quit") quit();
+    else setScreen({ kind: "quit" });
+  });
 
   useInput((input, key) => {
     if (key.ctrl || snapshot.stopping) return;
@@ -72,8 +78,13 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
     else if (input === "o") void open(row);
     else if (input === "a") { setDraft(""); setPasteMessage(null); setScreen({ kind: "paste" }); }
     else if (input === "s") { setSetting({ selected: 0, editing: false, error: null }); setScreen({ kind: "settings" }); }
-    else if (input === "q") controller.stop();
+    else if (input === "q") setScreen({ kind: "quit" });
   }, { isActive: screen.kind === "main" });
+
+  useInput((input, key) => {
+    if (input === "y") quit();
+    else if (input === "n" || key.escape) setScreen({ kind: "main" });
+  }, { isActive: screen.kind === "quit" && !snapshot.stopping });
 
   const detailFile = screen.kind === "detail" ? Object.values(snapshot.files).flat().find(file => file.id === screen.fileId) : undefined;
   const detailRow = detailFile ? rows.find(item => item.kind === "file" && item.file.id === detailFile.id) : undefined;
@@ -136,10 +147,12 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
       draft={draft} error={setting.error} size={size} theme={theme} />;
   }
   const keys: Array<[string, string]> = screen.kind === "confirm" ? [["y", "确认"], ["n", "返回"]]
+    : screen.kind === "quit" ? [["y", "退出"], ["n", "返回"]]
     : screen.kind === "paste" ? [["Enter", "提交"], ["Esc", "取消"]]
     : [["↑↓", "选择"], ["←→", "折叠"], ["Enter", "详情"], ["r", "重试"], ["c", "取消"], ["p", snapshot.userPaused ? "继续" : "暂停"], ["o", "目录"], ["a", "粘贴"], ["s", "设置"], ["q", "退出"]];
   const overlay = screen.kind === "confirm"
-    ? <ConfirmDialog title={screen.title} detail="本地文件、断点和云端副本都会保留，之后可用 r 恢复。" theme={theme} />
+    ? <ConfirmDialog heading="取消任务" title={screen.title} detail="本地文件、断点和云端副本都会保留，之后可用 r 恢复。" confirm="确认取消" theme={theme} />
+    : screen.kind === "quit" ? <ConfirmDialog heading="退出程序" title="停止下载并退出？" detail="当前下载会在安全点停止并保存断点，下次启动继续。" confirm="停止并退出" theme={theme} />
     : screen.kind === "paste" ? <PasteBox draft={draft} preview={controller.preview(draft)} outputRoot={snapshot.outputRoot} message={pasteMessage} theme={theme} width={size.columns - 4} />
     : undefined;
   return <MainPanel snapshot={snapshot} rows={rows} selected={selected} offset={effectiveOffset} size={size} theme={theme} overlay={overlay} overlayLines={overlayLines} keys={keys} />;

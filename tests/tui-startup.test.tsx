@@ -5,6 +5,9 @@ import { StartupApp, type StartupDeps } from "../src/tui/startup";
 import { createTheme } from "../src/tui/theme";
 import { login } from "../src/auth/login";
 import { FakeController, keys, settle, stripAnsi } from "./fixtures/tui";
+import { about } from "../src/about";
+import { LOGO } from "../src/tui/brand";
+import type { Size } from "../src/tui/main-panel";
 import { rejection } from "./fixtures/rejection";
 
 const mounted: Array<() => void> = [];
@@ -21,8 +24,8 @@ function fakeDeps(overrides: Partial<StartupDeps> = {}) {
     exit: code => { calls.exits.push(code); }, ...overrides };
   return { deps, calls };
 }
-function mount(deps: StartupDeps) {
-  const app = render(<StartupApp deps={deps} theme={createTheme({ NO_COLOR: "1" })} size={{ columns: 100, rows: 24 }} />);
+function mount(deps: StartupDeps, { size = { columns: 100, rows: 24 }, splashMs = 0 }: { size?: Size; splashMs?: number } = {}) {
+  const app = render(<StartupApp deps={deps} theme={createTheme({ NO_COLOR: "1" })} size={size} splashMs={splashMs} />);
   mounted.push(app.unmount);
   return { frame: () => stripAnsi(app.lastFrame() ?? ""), press: async (...inputs: string[]) => { for (const input of inputs) { app.stdin.write(input); await settle(); } } };
 }
@@ -94,3 +97,22 @@ test("不带参数且输出被重定向时打印纯文本帮助，不含控制�
   expect(code).toBe(0); expect(output).toContain("在交互终端中打开全屏界面"); expect(output).toContain("watch [--output <目录>]");
   expect(output).not.toContain("\x1b");
 });
+
+test("启动检查画面显示标志、版本、作者与项目地址，并至少保留设定时长", async () => {
+  const { deps, calls } = fakeDeps();
+  const { frame } = mount(deps, { size: { columns: 100, rows: 30 }, splashMs: 300 }); await settle();
+  const text = frame();
+  for (const part of [LOGO[0]!, LOGO[5]!, "D  O  W  N  L  O  A  D  E  R", `v${about.version}`, `作者 ${about.author}`, about.site, "正在检查登录状态与下载目录"]) expect(text).toContain(part);
+  expect(calls.started).toEqual([]);
+  await Bun.sleep(400); await settle();
+  expect(calls.started).toEqual(["account"]); expect(frame()).toContain("Enter 详情");
+});
+
+test("窗口不足 60×24 时启动画面改为单行标题，登录提示仍然可见", async () => {
+  const { deps } = fakeDeps({ account: async () => null });
+  const { frame } = mount(deps, { size: { columns: 100, rows: 20 } }); await settle();
+  const text = frame();
+  expect(text).not.toContain(LOGO[0]!); expect(text).toContain(about.name); expect(text).toContain(about.site);
+  expect(text).toContain("按 Enter 在浏览器中打开 PikPak 官方授权页"); expect(text).toContain("Esc 退出");
+});
+

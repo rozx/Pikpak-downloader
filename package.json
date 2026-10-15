@@ -1,6 +1,8 @@
 {
   "name": "pikpak-downloader",
   "version": "0.1.0",
+  "author": "rozx",
+  "homepage": "https://github.com/rozx/Pikpak-downloader",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.2",
