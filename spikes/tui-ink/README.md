@@ -14,6 +14,15 @@ bun compile.ts bun-windows-x64   # 只编译指定目标
 
 界面底部的事件区会显示每次按键时 Ink 实际收到的原始输入（内容、长度、按键标志），以及粘贴内容的长度和行数，用于判断各终端的输入行为。
 
+效果图还原界面 `mock.tsx` 按已确认的六张效果图绘制，只用于对比观感：
+
+```sh
+bun run mock               # 从源码运行
+bun run compile:mock       # 编译到 dist/tui-mock-*
+```
+
+数字键 1–6 切换主面板、暂停与取消确认、文件详情、粘贴框、设置和登录页；主面板中 ↑↓ 移动蓝底选中行、←→ 折叠分享；q 或 Ctrl+C 退出。
+
 ## Packaging Notes
 
 - 依赖：`ink` 8.0.0、`react` 19.3.1（精确版本），Bun 1.4.2。Ink 8 自带 `alternateScreen`、`usePaste`（自动开启括号粘贴，粘贴内容不进入 `useInput`）、`useWindowSize`、`maxFps`、`incrementalRendering`。

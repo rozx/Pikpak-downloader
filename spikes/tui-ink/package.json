@@ -6,7 +6,9 @@
   "scripts": {
     "start": "bun app.tsx",
     "typecheck": "tsc --noEmit",
-    "compile": "bun compile.ts"
+    "compile": "bun compile.ts",
+    "mock": "bun mock.tsx",
+    "compile:mock": "bun compile.ts --mock"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

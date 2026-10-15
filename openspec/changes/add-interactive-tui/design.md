@@ -128,7 +128,10 @@ windows-x64 产物已在 Claude Code 终端面板启动：中日韩名称按显�
 
 ### 1.2 终端实测
 
-待完成：Windows Terminal、Windows 传统控制台、macOS 终端按 `spikes/tui-ink/README.md` 的清单逐项记录。
+- Windows（2026-10-14）：用户按 `spikes/tui-ink/README.md` 清单实测 windows-x64 产物，报告全部通过。
+- macOS：待实测，作为发布门槛保留。
+
+用户反馈验证界面的观感不及效果图。验证程序随后增加 `mock.tsx`，用 Ink 按确认的六张效果图绘制主面板、暂停与取消确认、详情、粘贴框、设置和登录页，用于在真实终端中对比颜色、蓝底选中行、圆角边框和列宽自适应。
 
 ## Open Questions
 

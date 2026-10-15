@@ -4,7 +4,10 @@ import type { BunPlugin } from "bun";
 
 const targets = ["bun-darwin-arm64", "bun-darwin-x64", "bun-windows-x64", "bun-windows-arm64"] as const;
 type Target = typeof targets[number];
-const requested = process.argv.slice(2);
+// --mock 编译效果图还原界面 mock.tsx，默认编译能力验证界面 app.tsx。
+const mock = process.argv.includes("--mock");
+const entry = mock ? "mock.tsx" : "app.tsx", prefix = mock ? "tui-mock" : "tui-ink";
+const requested = process.argv.slice(2).filter(argument => !argument.startsWith("--"));
 const selected = requested.length ? requested : [...targets];
 const ink = await Bun.file(join(import.meta.dir, "node_modules/ink/package.json")).json() as { version: string };
 
@@ -24,9 +27,9 @@ await mkdir(join(import.meta.dir, "dist"), { recursive: true });
 const results: Array<{ target: string; ok: boolean; sizeMiB: string }> = [];
 for (const target of selected) {
   if (!targets.some(known => known === target)) throw Error(`未知目标：${target}`);
-  const outfile = join(import.meta.dir, "dist", `tui-ink-${target.replace("bun-", "")}${target.includes("windows") ? ".exe" : ""}`);
+  const outfile = join(import.meta.dir, "dist", `${prefix}-${target.replace("bun-", "")}${target.includes("windows") ? ".exe" : ""}`);
   const build = await Bun.build({
-    entrypoints: [join(import.meta.dir, "app.tsx")],
+    entrypoints: [join(import.meta.dir, entry)],
     // 独立产物不读取运行目录下的 .env 和 bunfig.toml，避免用户目录中的文件改变程序行为。
     compile: { target: target as Target, outfile, autoloadDotenv: false, autoloadBunfig: false },
     define: { INK_VERSION: JSON.stringify(ink.version) },
