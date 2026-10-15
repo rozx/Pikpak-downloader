@@ -12,7 +12,8 @@ export type RangeOutcome = { kind: "complete" } | { kind: "status"; status: numb
   | { kind: "ignored"; response: Response } | { kind: "mismatch"; status: number };
 export type RangeRequest = {
   http: DownloadTransport; lease: Lease; chunk: Chunk; size: bigint; file: LocalFile; signal: AbortSignal;
-  onBytes?: (bytes: number) => void; headerTimeoutMs?: number; stallTimeoutMs?: number;
+  // onAccepted：响应头通过核对、开始接收响应体之前调用（慢启动确认探测、租约刷新预算清零）。
+  onAccepted?: () => void; onBytes?: (bytes: number) => void; headerTimeoutMs?: number; stallTimeoutMs?: number;
 };
 
 // 一个连接接收一个分块的剩余部分：从已接收位置继续，核对 206 与精确的 Content-Range，
@@ -41,6 +42,7 @@ export async function receiveRange(request: RangeRequest): Promise<RangeOutcome>
     await response.body?.cancel().catch(() => {});
     return { kind: "mismatch", status: response.status };
   }
+  request.onAccepted?.();
   const reader = response.body.getReader();
   // 中断或停滞时不依赖响应体随信号报错：每次读取都与中断竞争，用户中断抛出中断原因，停滞视为网络失败。
   const stopped = new Promise<never>((_, reject) => {

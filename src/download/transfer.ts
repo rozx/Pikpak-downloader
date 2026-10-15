@@ -6,7 +6,9 @@ import { originalLink, secureDownloadUrl } from "./original-link";
 import { hashFile, publishVerified } from "./publish";
 import type { FileWorkspace } from "./workspace";
 import { retryAfter } from "../pikpak/protocol";
-
+import { CHUNK_SIZE } from "../state/ranges";
+import { UrlLease } from "./lease";
+import { downloadSegmented } from "./segmented";
 import { DownloadError } from "./download-error";
 export { DownloadError } from "./download-error";
 import type { DownloadTransport } from "./range-worker";
@@ -28,7 +30,8 @@ export async function remainingBytes(store: Store, accountId: string, file: File
     if (delivery.checkpoint > 0n && delivery.checkpoint <= file.size && info.size >= delivery.checkpoint && delivery.prefixSha256) {
       const hash = await prefix(local, file.size, delivery.checkpoint, signal);
       if (hash.prefixDigest() === delivery.prefixSha256) {
-        if (info.size > delivery.checkpoint) { await local.truncate(delivery.checkpoint); await local.sync(); }
+        // 前缀之后可能有已核对的分块区间，不截断；只截掉超过文件大小的部分。剩余量仍保守地按 size − L 计算。
+        if (info.size > file.size) { await local.truncate(file.size); await local.sync(); }
         return file.size - delivery.checkpoint;
       }
     }
@@ -38,9 +41,13 @@ export async function remainingBytes(store: Store, accountId: string, file: File
   } finally { await local.close(); }
 }
 
+export type DownloadOptions = { connections?: number; now?: () => number; headerTimeoutMs?: number; stallTimeoutMs?: number };
+
+// 连接数大于 1、文件超过一个分块且没有持久化为顺序模式时走分段路径（add-parallel-segment-download），否则走单连接顺序路径。
+// 两条路径共用最后的版本核对、读回校验与发布。
 export async function download(store: Store, accountId: string, file: FileRecord, copy: CopyRecord, workspace: FileWorkspace,
   metadata: () => Promise<RemoteFile>, signal: AbortSignal, progress: (bytes: bigint) => void = () => {},
-  http: DownloadTransport = (url, init) => fetch(url, init)): Promise<void> {
+  http: DownloadTransport = (url, init) => fetch(url, init), options: DownloadOptions = {}): Promise<void> {
   if (signal.aborted) throw signal.reason ?? Error("interrupted");
   const check = async () => {
     const value = await metadata();
@@ -50,11 +57,13 @@ export async function download(store: Store, accountId: string, file: FileRecord
   let remote = await check();
   const local = await workspace.temporary(file);
   let offset = 0n, hasher = new ContentHasher(file.size), checkpoint = 0n;
-  let closed = false;
+  let closed = false, sequential = false;
   const save = async () => {
     await local.sync(); store.checkpoint(accountId, file.id, offset, hasher.prefixDigest()); checkpoint = offset;
   };
-  try {
+  // 单连接顺序路径：每段重新核对版本与下载地址，只有一个在途下载连接。
+  const sequentialDownload = async (): Promise<{ gcid: string; sha256: string }> => {
+    sequential = true;
     const delivery = store.delivery(accountId, file.id)!;
     const info = await local.info();
     if (delivery.checkpoint > 0n && delivery.checkpoint <= file.size && info.size >= delivery.checkpoint && delivery.prefixSha256) {
@@ -65,7 +74,6 @@ export async function download(store: Store, accountId: string, file: FileRecord
     await local.truncate(offset);
     if (store.file(accountId, file.id).state !== "downloading") store.transition(accountId, file.id, "downloading");
     await save();
-    // 每段重新核对版本与下载地址，只有一个在途下载连接。
     let addressRetries = 0, rangeRestarts = 0;
     while (offset < file.size) {
       if (signal.aborted) throw signal.reason ?? Error("interrupted");
@@ -116,7 +124,17 @@ export async function download(store: Store, accountId: string, file: FileRecord
       await save(); addressRetries = 0;
     }
     await check(); await save();
-    const digest = hasher.digest();
+    return hasher.digest();
+  };
+  try {
+    const connections = options.connections ?? 1;
+    const parallel = connections > 1 && file.size > CHUNK_SIZE && store.delivery(accountId, file.id)!.ranges?.mode !== "sequential";
+    const digest = parallel
+      ? await downloadSegmented({ store, accountId, file, local, connections, http, signal, progress, lease: new UrlLease(check, options.now),
+        ...(options.now ? { now: options.now } : {}), ...(options.headerTimeoutMs === undefined ? {} : { headerTimeoutMs: options.headerTimeoutMs }),
+        ...(options.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: options.stallTimeoutMs }) })
+      : await sequentialDownload();
+    if (parallel) await check();
     if (digest.gcid !== file.gcid) throw new DownloadError("integrity_mismatch");
     store.transition(accountId, file.id, "verifying");
     const readBack = await hashFile(local, file.size, signal);
@@ -125,12 +143,12 @@ export async function download(store: Store, accountId: string, file: FileRecord
     await publishVerified(store, accountId, file, workspace, digest, signal);
   } catch (error) {
     if (!closed && error instanceof DownloadError && error.code === "integrity_mismatch") {
+      // 从头开始并清空区间；顺序模式标记保留（这不是 Range 异常）。
       offset = 0n; hasher = new ContentHasher(file.size); await local.truncate(0n);
       if (store.file(accountId, file.id).state === "verifying") store.transition(accountId, file.id, "downloading");
       await save();
-    }
-    if (!closed && store.file(accountId, file.id).state === "downloading") {
-      // 仅已完整写入并进入摘要的前缀可成为检查点。
+    } else if (!closed && sequential && store.file(accountId, file.id).state === "downloading") {
+      // 仅已完整写入并进入摘要的前缀可成为检查点；分段路径在内部保存自己的检查点。
       await save().catch(() => {});
     }
     throw error;

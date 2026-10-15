@@ -2,7 +2,7 @@ import type { LocalFile } from "../../src/platform/files";
 
 // 内存中的本地文件：记录写入、同步与关闭，供下载协调逻辑的单元测试使用；真实文件桥由平台测试覆盖。
 export class MemoryFile implements LocalFile {
-  data = new Uint8Array(0);
+  data: Uint8Array<ArrayBuffer> = new Uint8Array(0);
   syncs = 0; closed = false;
   readonly writes: Array<{ position: bigint; length: number }> = [];
   failWrite: Error | null = null;

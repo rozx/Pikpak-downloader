@@ -7,7 +7,9 @@ import { systemFiles } from "../src/platform/file-system";
 import type { LocalFileSystem } from "../src/platform/files";
 import { FileWorkspace } from "../src/download/workspace";
 import { ContentHasher } from "../src/download/gcid";
-import { download, type DownloadTransport } from "../src/download/transfer";
+import { download, remainingBytes, type DownloadTransport } from "../src/download/transfer";
+import { CHUNK_SIZE } from "../src/state/ranges";
+import { createHash } from "node:crypto";
 import { publishVerified, reconcilePublication } from "../src/download/publish";
 import type { CopyRecord } from "../src/state/store";
 import { rejection } from "./fixtures/rejection";
@@ -142,3 +144,52 @@ test.if(nativeFiles)("错误范围、截断与地址持续过期均有界失败�
     } finally { await f.close(); }
   }
 });
+
+const segmentedContent = (seed: number) => Buffer.from(Uint8Array.from({ length: 2 * Number(CHUNK_SIZE) + 4099 }, (_, index) => (index * seed + 13) % 251));
+const fastClock = () => performance.now() * 50;
+
+test.if(nativeFiles)("多连接分段路径经真实文件桥下载、读回校验并发布", async () => {
+  const f = await fixture(segmentedContent(7));
+  try {
+    const ranges: string[] = [];
+    const transport = rangeTransport(f.content);
+    const http: DownloadTransport = async (url, init) => { ranges.push(new Headers(init.headers).get("range")!); return transport(url, init); };
+    await download(f.store, "account", f.file, f.copy, f.workspace, f.metadata, new AbortController().signal, undefined, http, { connections: 4, now: fastClock });
+    expect(f.store.file("account", f.file.id).state).toBe("completed");
+    expect(await readFile(f.store.delivery("account", f.file.id)!.targetPath)).toEqual(f.content);
+    expect(ranges.map(range => Number(/^bytes=(\d+)-/.exec(range)![1])).sort((a, b) => a - b)).toEqual([0, Number(CHUNK_SIZE), 2 * Number(CHUNK_SIZE)]);
+  } finally { await f.close(); }
+}, 60000);
+
+test.if(nativeFiles)("同大小但内容被篡改的分段响应不能完成：从头开始并清空区间", async () => {
+  const f = await fixture(segmentedContent(11));
+  try {
+    const tampered = Buffer.from(f.content); tampered[Number(CHUNK_SIZE) + 5] = tampered[Number(CHUNK_SIZE) + 5]! ^ 0xff;
+    const error = await rejection(download(f.store, "account", f.file, f.copy, f.workspace, f.metadata, new AbortController().signal, undefined,
+      rangeTransport(tampered), { connections: 4, now: fastClock }));
+    expect((error as { code?: string }).code).toBe("integrity_mismatch");
+    expect(f.store.file("account", f.file.id).state).toBe("downloading");
+    expect(f.store.delivery("account", f.file.id)).toMatchObject({ checkpoint: 0n, ranges: null, completedAt: null });
+  } finally { await f.close(); }
+}, 60000);
+
+test.if(nativeFiles)("本地空间预估不截断前缀之后的分块数据，只截掉超过文件大小的部分", async () => {
+  const f = await fixture(segmentedContent(17));
+  try {
+    const S = Number(CHUNK_SIZE), local = await f.workspace.temporary(f.file);
+    await local.write(0n, f.content.subarray(0, S + 100)); await local.sync(); await local.close();
+    const prefix = new ContentHasher(f.file.size); prefix.update(f.content.subarray(0, S));
+    f.store.transition("account", f.file.id, "downloading");
+    f.store.checkpoint("account", f.file.id, CHUNK_SIZE, prefix.prefixDigest(), { mode: "parallel", chunk: CHUNK_SIZE,
+      ranges: [{ offset: CHUNK_SIZE, bytes: 100n, sha256: createHash("sha256").update(f.content.subarray(S, S + 100)).digest("hex") }] });
+    expect(await remainingBytes(f.store, "account", f.file, f.workspace)).toBe(f.file.size - CHUNK_SIZE);
+    let check = await f.workspace.temporary(f.file);
+    try { expect((await check.info()).size).toBe(CHUNK_SIZE + 100n); } finally { await check.close(); }
+    const grow = await f.workspace.temporary(f.file); await grow.write(f.file.size, Buffer.from("garbage")); await grow.sync(); await grow.close();
+    await remainingBytes(f.store, "account", f.file, f.workspace);
+    check = await f.workspace.temporary(f.file);
+    try { expect((await check.info()).size).toBe(f.file.size); } finally { await check.close(); }
+    expect(f.store.delivery("account", f.file.id)?.ranges?.ranges).toHaveLength(1);
+  } finally { await f.close(); }
+}, 60000);
+
