@@ -24,6 +24,7 @@ bun run build bun-windows-x64                  # 单文件产物输出到 dist/�
 - 改名只涉及对外名称。任务库目录 `PikpakDownloader`、凭据条目 `com.rozx.pikpak-downloader` 与环境变量 `PIKPAK_DOWNLOADER_STATE_DIR` 沿用旧名，已有任务与登录才能继续使用；不要改这些名字。
 - `PIKPAK_DOWNLOADER_STATE_DIR` 用来另指任务库与锁所在的目录，测试与本地试验时使用。默认目录：macOS 为 `~/Library/Application Support/PikpakDownloader`，Windows 为 `%LOCALAPPDATA%\PikpakDownloader`，Linux 为 `$XDG_DATA_HOME/PikpakDownloader`（未设置时为 `~/.local/share/PikpakDownloader`）。
 - 构建 macOS 原生模块（`native/macos.mm`）需要 Xcode Command Line Tools 与 Node-API 头文件，头文件目录可用 `NODE_API_HEADERS` 指定。
+- Windows 产物的图标由 `scripts/icon.ts` 从 24×24 像素图生成 ICO（写到 `dist/icon.ico`），连同名称、发布者、版本经 `Bun.build` 的 `compile.windows` 写入；改图标就改其中的字符图。macOS 与 Linux 的可执行文件无法内嵌图标。
 
 ## 工作方式
 
