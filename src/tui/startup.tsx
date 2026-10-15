@@ -4,7 +4,7 @@ import { AppError } from "../errors";
 import type { TuiController } from "./controller";
 import { createTheme, type Theme } from "./theme";
 import { explain } from "./view-model";
-import { Keys, Rule, Title } from "./parts";
+import { Keys, Rule, SPINNER as spinner, Title } from "./parts";
 import { Brand } from "./brand";
 import { TuiApp } from "./app";
 import type { Size } from "./main-panel";
@@ -23,7 +23,6 @@ type Phase = { kind: "checking" } | { kind: "busy" } | { kind: "failed"; message
   | { kind: "login"; waiting: boolean; messages: string[]; error: string | null }
   | { kind: "setup"; account: string; draft: string; error: string | null }
   | { kind: "main"; controller: TuiController };
-const spinner = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 const reasonOf = (error: unknown) => error instanceof AppError ? error.code : "operation_failed";
 // 完整标志连同下方提示至少需要 60×24，放不下时改为单行标题。
 const BRAND_COLUMNS = 60, BRAND_ROWS = 24;

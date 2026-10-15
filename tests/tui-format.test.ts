@@ -44,21 +44,16 @@ test("主题使用标准 16 色，NO_COLOR 关闭颜色并以反色标示选中"
   const colored = createTheme({});
   expect(colored.enabled).toBe(true);
   expect([colored.tone("done"), colored.tone("active"), colored.tone("warning"), colored.tone("error"), colored.tone("muted")]).toEqual(["green", "cyan", "yellow", "red", "gray"]);
-  expect(colored.selection).toEqual({ backgroundColor: "blue" });
+  expect(colored.selection).toEqual({ backgroundColor: "white" });
   const plain = createTheme({ NO_COLOR: "1" });
   expect(plain.enabled).toBe(false); expect(plain.tone("error")).toBe(undefined); expect(plain.selection).toEqual({ inverse: true });
   expect(createTheme({ NO_COLOR: "" }).enabled).toBe(true);
 });
 
-test("选中调色板在蓝底上不使用蓝、品红、红、灰等低对比色，NO_COLOR 下不输出颜色", () => {
+test("选中行为浅色底，文字只用黑色，下载与转存用蓝色；NO_COLOR 下不输出颜色", () => {
   const colored = createTheme({});
   const tones = ["done", "active", "transfer", "scan", "warning", "error", "muted", "text", "strong", "key"] as const;
-  const weak = ["blue", "blueBright", "magenta", "magentaBright", "red", "redBright", "gray", "black", "blackBright"];
-  for (const tone of tones) {
-    const painted = colored.paint(tone, true);
-    expect("color" in painted).toBe(true);
-    expect(weak).not.toContain((painted as { color: string }).color);
-  }
+  for (const tone of tones) expect(colored.paint(tone, true)).toEqual({ color: ["active", "transfer"].includes(tone) ? "blue" : "black" });
   expect(colored.paint("transfer")).toEqual({ color: "blue" });
   for (const tone of tones) expect(createTheme({ NO_COLOR: "1" }).paint(tone, true)).toEqual({});
 });

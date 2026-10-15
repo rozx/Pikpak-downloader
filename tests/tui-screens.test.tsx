@@ -4,7 +4,7 @@ import { TuiApp } from "../src/tui/app";
 import { createTheme, type Theme, type Tone } from "../src/tui/theme";
 import { displayWidth } from "../src/tui/format";
 import { RowLine, type Size } from "../src/tui/main-panel";
-import { Rule, creditLabel } from "../src/tui/parts";
+import { Rule, SPINNER, creditLabel } from "../src/tui/parts";
 import { buildRows } from "../src/tui/view-model";
 import { about } from "../src/about";
 import { FakeController, keys, mockSnapshot, settle, stripAnsi } from "./fixtures/tui";
@@ -213,5 +213,20 @@ test("选中行的全部文字与进度条使用选中调色板，未选中行�
       expect(calls.every(([, flag]) => flag === selected)).toBe(true);
     }
   }
+});
+
+test("正在执行的文件显示动态图标；暂停或系统暂停时恢复静态图标", async () => {
+  const controller = new FakeController();
+  const { frame } = mount(controller); await settle();
+  const downloading = () => frame().split("\n").find(line => line.includes("episode02.mkv")) ?? "";
+  const icon = () => downloading().trim().replace(/^>\s*/, "").charAt(0);
+  expect(SPINNER).toContain(icon());
+  const first = icon(); await Bun.sleep(300);
+  expect(SPINNER).toContain(icon()); expect(icon()).not.toBe(first);
+  expect(frame().split("\n").find(line => line.includes("episode03.mkv"))).toContain("·  episode03.mkv");
+  controller.update({ userPaused: true }); await settle();
+  expect(icon()).toBe("⏸");
+  controller.update({ userPaused: false, systemPause: { reason: "authentication", fileId: null } }); await settle();
+  expect(icon()).toBe("↓");
 });
 

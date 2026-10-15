@@ -4,12 +4,13 @@ const palette: Record<Tone, string> = {
   done: "green", active: "cyan", transfer: "blue", scan: "magenta", warning: "yellow", error: "red",
   muted: "gray", text: "white", strong: "whiteBright", key: "yellowBright",
 };
-// 选中行是蓝底：灰、蓝、品红、红色文字在蓝底上难以辨认，改用亮白；其余状态改用亮色。
+// 选中行用浅色底、黑色文字：各终端主题的蓝色亮度差异很大，蓝底配亮色文字在部分主题中看不清。
+// 浅色底上只有黑色与蓝色在常见主题中都足够清楚；下载与转存的进度条和动态图标保留蓝色。
 const onSelection: Record<Tone, string> = {
-  done: "greenBright", active: "cyanBright", transfer: "whiteBright", scan: "whiteBright", warning: "yellowBright", error: "whiteBright",
-  muted: "white", text: "whiteBright", strong: "whiteBright", key: "yellowBright",
+  done: "black", active: "blue", transfer: "blue", scan: "black", warning: "black", error: "black",
+  muted: "black", text: "black", strong: "black", key: "black",
 };
-export const SELECTION_BACKGROUND = "blue";
+export const SELECTION_BACKGROUND = "white";
 export type Highlight = { backgroundColor: string; color?: string } | { inverse: true };
 export type Theme = { enabled: boolean; tone(tone: Tone): string | undefined; paint(tone: Tone, selected?: boolean): { color: string } | Record<string, never>;
   selection: Highlight; title: Highlight; banner: Highlight };

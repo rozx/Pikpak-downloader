@@ -4,14 +4,15 @@ import type { RuntimeEvent } from "../runtime/engine";
 import type { Tone } from "./theme";
 import { displayPath, fileName } from "./format";
 
-export type Look = { icon: string; tone: Tone; label: string };
+// active：执行器正在处理该状态的文件，界面以动态图标表示。
+export type Look = { icon: string; tone: Tone; label: string; active?: boolean };
 export type Explanation = { reason: string; advice: string };
 
 const stateLooks: Record<FileState, Look> = {
   discovered: { icon: "·", tone: "muted", label: "排队中" }, ready: { icon: "·", tone: "muted", label: "排队中" },
-  saving: { icon: "⇡", tone: "transfer", label: "转存中" }, awaiting_remote: { icon: "⇡", tone: "transfer", label: "等待转存完成" },
-  downloading: { icon: "↓", tone: "active", label: "下载中" }, verifying: { icon: "⟳", tone: "active", label: "校验中" },
-  publishing: { icon: "↓", tone: "active", label: "正在落盘" }, completed: { icon: "✓", tone: "done", label: "已完成" },
+  saving: { icon: "⇡", tone: "transfer", label: "转存中", active: true }, awaiting_remote: { icon: "⇡", tone: "transfer", label: "等待转存完成", active: true },
+  downloading: { icon: "↓", tone: "active", label: "下载中", active: true }, verifying: { icon: "⟳", tone: "active", label: "校验中", active: true },
+  publishing: { icon: "↓", tone: "active", label: "正在落盘", active: true }, completed: { icon: "✓", tone: "done", label: "已完成" },
   waiting_space: { icon: "⌛", tone: "warning", label: "等待云端空间" }, retry_wait: { icon: "⌛", tone: "warning", label: "稍后重试" },
   failed: { icon: "✗", tone: "error", label: "失败" }, reconciling: { icon: "⟳", tone: "warning", label: "正在核对" },
   needs_attention: { icon: "✗", tone: "error", label: "需要处理" },

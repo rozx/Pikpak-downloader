@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Highlight, Theme, Tone } from "./theme";
 import type { TuiSnapshot } from "./controller";
 import { displayWidth, formatBytes } from "./format";
@@ -9,6 +9,18 @@ import { about } from "../about";
 // Box 只支持背景色；无颜色模式下选中改由文字反色表示。
 export const boxHighlight = (highlight: Highlight, on: boolean) => on && "backgroundColor" in highlight ? { backgroundColor: highlight.backgroundColor } : {};
 export const textHighlight = (highlight: Highlight, on: boolean) => !on ? {} : "inverse" in highlight ? { inverse: true } : highlight.color ? { color: highlight.color } : {};
+
+export const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+// 有正在执行的项目时每 120 ms 换一帧，否则不启动计时器。
+export function useSpinner(enabled: boolean): number | null {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setInterval(() => setFrame(value => (value + 1) % SPINNER.length), 120);
+    return () => clearInterval(timer);
+  }, [enabled]);
+  return enabled ? frame : null;
+}
 
 export type Segment = { text: string; tone: Tone };
 const segmentsWidth = (segments: Segment[]) => segments.reduce((sum, segment) => sum + displayWidth(segment.text), 0);
