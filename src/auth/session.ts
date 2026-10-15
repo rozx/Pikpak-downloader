@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { AppError } from "../errors";
 import type { SecretStore } from "../platform/types";
 import { discover, identity, profile, quotaReadable, refresh, register, transport, type Client, type Profile, type Tokens, type Transport } from "../pikpak/protocol";
-import { grantedScopes } from "./permissions";
+import { grantedScopes, permissionStates, type PermissionStates } from "./permissions";
+import { probePermissions, probeStates, type ProbeResult } from "../pikpak/permission-probe";
 
 // scopes：服务端授予的授权范围；旧记录或服务端未返回时省略，读作未知。
 type Session = { accountId: string; clientId: string; accessKey: string; refreshKey?: string; expiresAt: number; scopes?: string[] };
@@ -138,6 +139,17 @@ export class SessionManager {
   async scopes(): Promise<string[] | null> {
     await this.recover();
     return (await this.current())?.scopes ?? null;
+  }
+  // 用当前会话实际探测每项权限（improve-account-login 决策 2）；没有会话时为 null。
+  async probe(): Promise<{ accountId: string; results: ProbeResult[]; scopes: string[] | null } | null> {
+    await this.recover();
+    const session = await this.current();
+    if (!session) return null;
+    return { accountId: session.accountId, results: await probePermissions(await this.access(session.accountId), this.http), scopes: session.scopes ?? null };
+  }
+  async permissions(): Promise<PermissionStates | null> {
+    const probed = await this.probe();
+    return probed ? permissionStates(probeStates(probed.results), probed.scopes) : null;
   }
   async profile(expected: string): Promise<Profile> {
     const result = await profile(await this.access(expected), this.http);

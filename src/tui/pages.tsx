@@ -11,7 +11,9 @@ import { DEFAULT_CONNECTIONS, MAX_CONNECTIONS } from "../download/connections";
 import { DEFAULT_ACTIVE_FILES, MAX_ACTIVE_FILES } from "../runtime/active-files";
 import { PAID_ACTIVE_FILES } from "../pikpak/tier";
 import type { AccountView, TuiSnapshot } from "./controller";
-import { informativeScopes, missingPermissions, permissionNames, permissionRows } from "../auth/permissions";
+import { missingPermissions, permissionNames, permissionRows, permissionStates, permissionsUnknown } from "../auth/permissions";
+// 探测结果优先，尚未探测时退回授权范围。
+const statesOf = (account: AccountView) => permissionStates(account.permissions, account.scopes);
 
 const copyStates: Record<string, string> = { retained: "保留中 · 按 x 可立即释放", deleting: "删除中", deleted: "已删除 · 不在云盘中", protected: "受保护 · 不会自动删除" };
 // 本地文件一行（add-task-controls 决策 6）：已完成看交付的文件是否仍在，未完成看断点。
@@ -58,8 +60,8 @@ function membershipText(account: AccountView | null): [string, Tone] {
 }
 function permissionSummary(account: AccountView | null): [string, Tone] {
   if (!account) return ["暂不可用", "muted"];
-  if (!informativeScopes(account.scopes)) return ["无法确认", "muted"];
-  const missing = missingPermissions(account.scopes);
+  const states = statesOf(account), missing = missingPermissions(states);
+  if (!missing.length && permissionsUnknown(states)) return ["无法确认", "muted"];
   return missing.length ? [`缺少 ${permissionNames(missing)}`, "error"] : ["完整", "done"];
 }
 
@@ -143,7 +145,7 @@ export function AccountPage({ account, quota, confirming, size, theme }: {
     ["会员", member, memberTone],
     ["云盘容量", quota ? `已用 ${formatBytes(quota.usage, true)} / 共 ${formatBytes(quota.limit)}${quota.limit > 0n ? `（${(Number(quota.usage * 1000n / quota.limit) / 10).toFixed(1)}%）` : ""}` : "暂不可用", quota ? "text" : "muted"],
   ];
-  const missing = account ? missingPermissions(account.scopes) : [];
+  const states = account ? statesOf(account) : null, missing = states ? missingPermissions(states) : [];
   return (
     <Box flexDirection="column" height={size.rows} paddingX={1}>
       <Title text="账号" theme={theme} />
@@ -154,7 +156,7 @@ export function AccountPage({ account, quota, confirming, size, theme }: {
         ))}
         <Box marginTop={1}><Box width={12} flexShrink={0}><Text {...theme.paint("muted")}>  授权权限</Text></Box>
           <Box flexDirection="column">
-            {account ? permissionRows(account.scopes).map(row => {
+            {account && states ? permissionRows(states, account.scopes).map(row => {
               const look = permissionLook[row.state], tone = row.state === "missing" && !row.required ? "muted" : look.tone;
               return <Box key={row.scope}><Box width={12} flexShrink={0}><Text {...theme.paint(tone)}>{look.icon} {row.label}</Text></Box>
                 <Text {...theme.paint("muted")} wrap="truncate-end">{row.scope} · {row.use}{row.required ? "" : "（可选）"}</Text></Box>;
@@ -162,7 +164,7 @@ export function AccountPage({ account, quota, confirming, size, theme }: {
           </Box>
         </Box>
         {missing.length > 0 && <Text {...theme.paint("error")}>  ✗ 缺少必须的权限：{permissionNames(missing)}。按 r 重新授权，并在授权页勾选全部权限。</Text>}
-        {account && !informativeScopes(account.scopes) && <Text {...theme.paint("muted")}>  服务端返回的授权范围不含应用权限，无法确认授权页的勾选结果；操作被拒绝时按 r 重新授权。</Text>}
+        {states && !missing.length && permissionsUnknown(states) && <Text {...theme.paint("muted")}>  {account?.permissions ? "部分权限暂时无法探测（网络或服务端错误），稍后重新打开本页再看。" : "正在探测权限…"}</Text>}
         {confirming && <Box marginTop={1}><ConfirmDialog heading="登出" title="停止下载并登出当前账号？" confirm="确认登出" theme={theme}
           detail="下载在安全点停止并清除令牌；任务、分享资料与本地文件保留。" /></Box>}
       </Box>

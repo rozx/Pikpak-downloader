@@ -33,19 +33,28 @@ export function grantedScopes(tokens: { accessToken: string; scope?: string[] })
 const known = new Set(PERMISSIONS.map(permission => permission.scope));
 export const informativeScopes = (scopes: readonly string[] | null): readonly string[] | null =>
   scopes?.some(scope => known.has(scope)) ? scopes : null;
-// 授权范围未知时不判定缺少。
-export function missingPermissions(scopes: readonly string[] | null): Permission[] {
-  const granted = informativeScopes(scopes);
-  return granted ? PERMISSIONS.filter(permission => permission.required && !granted.includes(permission.scope)) : [];
-}
 
 export type PermissionState = "granted" | "missing" | "unknown";
+export type PermissionStates = Partial<Record<string, PermissionState>>;
+// 每项权限的状态：实际探测结果优先（见 pikpak/permission-probe.ts）；探测无法判断时，才参考含应用权限的授权范围。
+export function permissionStates(probed: PermissionStates | null, scopes: readonly string[] | null): PermissionStates {
+  const granted = informativeScopes(scopes), states: PermissionStates = {};
+  for (const { scope } of PERMISSIONS) {
+    const probe = probed?.[scope] ?? "unknown";
+    states[scope] = probe !== "unknown" ? probe : granted ? (granted.includes(scope) ? "granted" : "missing") : "unknown";
+  }
+  return states;
+}
+// 只有明确缺少才算缺少；无法判断时不阻止登录。
+export const missingPermissions = (states: PermissionStates): Permission[] =>
+  PERMISSIONS.filter(permission => permission.required && states[permission.scope] === "missing");
+export const permissionsUnknown = (states: PermissionStates): boolean =>
+  PERMISSIONS.some(permission => permission.required && (states[permission.scope] ?? "unknown") === "unknown");
+
 export type PermissionRow = Permission & { state: PermissionState };
-// 已知权限按定义顺序列出，再附上未知的额外范围。
-// 其他范围即使不足以判断应用权限也照样列出，便于对照授权页。
-export function permissionRows(scopes: readonly string[] | null): PermissionRow[] {
-  const granted = informativeScopes(scopes);
-  const rows: PermissionRow[] = PERMISSIONS.map(permission => ({ ...permission, state: !granted ? "unknown" : granted.includes(permission.scope) ? "granted" : "missing" }));
+// 已知权限按定义顺序列出，再附上授权范围中的其他项，便于对照授权页。
+export function permissionRows(states: PermissionStates, scopes: readonly string[] | null = null): PermissionRow[] {
+  const rows: PermissionRow[] = PERMISSIONS.map(permission => ({ ...permission, state: states[permission.scope] ?? "unknown" }));
   for (const scope of scopes ?? []) if (!known.has(scope) && !BASIC.has(scope)) rows.push({ scope, label: scope, use: "其他权限", required: false, state: "granted" });
   return rows;
 }

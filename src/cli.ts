@@ -10,7 +10,8 @@ import { Store } from "./state/store";
 import { systemSecrets } from "./auth/secrets";
 import { SessionManager } from "./auth/session";
 import { login } from "./auth/login";
-import { informativeScopes, permissionRows } from "./auth/permissions";
+import { missingPermissions, permissionNames, permissionRows, permissionStates } from "./auth/permissions";
+import { probeStates } from "./pikpak/permission-probe";
 import { clipboardWorker } from "./intake/clipboard-worker";
 import { watch } from "./runtime/watch";
 import { interruptible } from "./runtime/lifecycle";
@@ -27,6 +28,7 @@ const help = `${about.name} ${about.version}（开发中）
   --help                 显示帮助
   --version              显示版本
   login [--force]         浏览器登录或核对已有会话
+  permissions            探测当前授权的各项权限（只读，无副作用）
   logout                 清除认证令牌并保留任务
   watch [--output <目录>] 前台监听剪贴板并处理下载队列
   status [任务ID]        只读查看任务状态
@@ -39,6 +41,25 @@ const help = `${about.name} ${about.version}（开发中）
 
 尚未完成真实综合验收；Windows 与其他架构仍需实际运行验证。
 `;
+
+const stateIcon = { granted: "✓", missing: "✗", unknown: "?" } as const;
+// 逐项打印探测结果（HTTP 状态与错误类别，不含令牌或地址）与最终判定。
+async function printPermissions(session: SessionManager, detail: boolean): Promise<void> {
+  const probed = await session.probe();
+  if (!probed) { console.log("尚未登录。"); return; }
+  if (detail) {
+    console.log("探测：");
+    for (const result of probed.results) console.log(`  ${stateIcon[result.state]} ${result.label}（${result.permission}）  HTTP ${result.status ?? "无响应"}${result.reason ? `  ${result.reason}` : ""}`);
+    console.log(`服务端返回的授权范围：${probed.scopes?.join(" ") || "未返回"}`);
+    console.log("判定：");
+  }
+  const states = permissionStates(probeStates(probed.results), probed.scopes);
+  for (const row of permissionRows(states, probed.scopes)) {
+    console.log(`  ${stateIcon[row.state]} ${row.label}（${row.scope}）${row.state === "missing" ? (row.required ? " 缺少" : " 未授予，本工具暂不使用") : row.state === "unknown" ? " 无法确认" : ""}`);
+  }
+  const missing = missingPermissions(states);
+  if (missing.length) console.log(`缺少必须的权限：${permissionNames(missing)}。请运行 login --force 重新授权并勾选全部权限。`);
+}
 
 function activeAccount(store: Store): string {
   const account = store.config("active_account");
@@ -86,10 +107,10 @@ export async function runCli(args: string[]): Promise<void> {
     } finally { store.close(); }
     return;
   }
-  if (["config", "retry", "cancel", "login", "logout", "watch"].includes(command!)) {
+  if (["config", "retry", "cancel", "login", "logout", "watch", "permissions"].includes(command!)) {
     if (command === "config" ? args.length !== 3 || !["--output", "--connections", "--files"].includes(args[1]!) : ["retry", "cancel"].includes(command!) && args.length !== 2) throw new AppError("invalid_input");
     if (command === "login" && (args.length > 2 || (args[1] && args[1] !== "--force"))) throw new AppError("invalid_input");
-    if (command === "logout" && args.length !== 1) throw new AppError("invalid_input");
+    if ((command === "logout" || command === "permissions") && args.length !== 1) throw new AppError("invalid_input");
     if (command === "watch" && args.length !== 1 && !(args.length === 3 && args[1] === "--output")) throw new AppError("invalid_input");
     const paths = await prepareState();
     const lock = acquireQueueLock(paths.lock);
@@ -100,6 +121,7 @@ export async function runCli(args: string[]): Promise<void> {
           await interruptible(signal => watch(store, args[2] ?? null, signal));
           return;
         }
+        if (command === "permissions") { await printPermissions(new SessionManager(systemSecrets()), true); return; }
         if (command === "login" || command === "logout") {
           const session = new SessionManager(systemSecrets(), undefined, account => { store.ensureAccount(account); store.pause(account, "authentication"); });
           if (command === "logout") {
@@ -111,9 +133,7 @@ export async function runCli(args: string[]): Promise<void> {
             const account = await login(session, args[1] === "--force");
             store.ensureAccount(account); store.setConfig("active_account", account); store.clearAuthenticationPause(account);
             console.log("登录成功，账号身份与容量读取已核对。");
-            const scopes = await session.scopes();
-            if (!informativeScopes(scopes)) console.log("服务端返回的授权范围不含应用权限，无法确认授权页的勾选结果；操作被拒绝时请用 login --force 重新授权并勾选全部权限。");
-            else for (const row of permissionRows(scopes)) console.log(`  ${row.state === "granted" ? "✓" : "✗"} ${row.label}（${row.scope}）${row.state === "missing" ? (row.required ? " 缺少" : " 未授予，本工具暂不使用") : ""}`);
+            await printPermissions(session, false);
           }
           return;
         }

@@ -39,7 +39,7 @@ export function mockSnapshot(): TuiSnapshot {
       { at: Date.parse("2026-10-14T22:32:12"), icon: "✗", tone: "error", text: "part1.mp4 下载失败" },
       { at: Date.parse("2026-10-14T22:33:40"), icon: "✓", tone: "done", text: "episode01.mkv 校验通过，已完成" }],
     outputRoot: "C:\\Users\\demo\\Downloads\\PikPak-Test", stopping: false, connections: 4, activeFiles: { configured: 1, effective: 1, tier: "paid" }, localMissing: new Set<string>(), releasing: new Set<string>(),
-    account: { id: "synthetic-account", name: "演示用户", email: "demo@example.com", scopes: ["account", "files:manage", "share", "cloud_download"],
+    account: { id: "synthetic-account", name: "演示用户", email: "demo@example.com", scopes: ["openid", "profile"], permissions: { account: "granted", "files:manage": "granted", share: "granted", cloud_download: "granted" },
       membership: { tier: "paid", type: "platinum", expire: Date.parse("2027-01-01T00:00:00Z") } },
   };
 }

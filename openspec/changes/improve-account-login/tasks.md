@@ -27,4 +27,11 @@
 ## 5. 文档与验收
 
 - [x] 5.1 更新 `docs/login.md`，运行 `bun run check` 与 `openspec validate improve-account-login --strict`。
-- [ ] 5.2 实机登录一次，确认服务端返回的授权范围格式及账号页显示；结果写入 `design.md`。
+- [x] 5.2 实机登录一次，确认服务端返回的授权范围格式及账号页显示；结果写入 `design.md`。验收：授权范围不反映勾选结果（见 Evidence）。
+
+## 6. 实际探测权限
+
+- [x] 6.1 新增 `src/pikpak/permission-probe.ts`：每项权限无副作用的探测与判定规则；`permissions.ts` 改为按探测状态判定，授权范围只作参考。
+- [x] 6.2 登录回调、非强制登录、启动检查与账号页改用探测结果；新增 CLI `permissions` 逐项打印探测结果。
+- [x] 6.3 测试：判定规则、探测无副作用、只回显基础范围时探测通过即登录完成、探测拒绝不暂停账号。
+- [ ] 6.4 实机核对：全部勾选时 `permissions` 全部通过；漏勾一项重新授权时，回调页提示缺少该项。结果写入 `design.md`。

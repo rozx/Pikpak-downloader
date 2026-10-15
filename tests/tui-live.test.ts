@@ -161,7 +161,7 @@ test("已完成文件的本地文件是否仍在：存在、被删除后标为�
 test("账号资料在启动与打开账号页时读取；读取失败保留上次结果", async () => {
   let reads = 0, fail = false;
   const f = await fixture({ account: async () => { reads++; if (fail) throw Error("synthetic-failure");
-    return { id: "account", name: `用户${reads}`, email: null, scopes: ["account"], membership: null }; } });
+    return { id: "account", name: `用户${reads}`, email: null, scopes: ["account"], permissions: null, membership: null }; } });
   try {
     expect(f.live.snapshot().account).toBe(null);
     f.live.start(); await Bun.sleep(30);

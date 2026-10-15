@@ -37,7 +37,7 @@ export async function runTui(): Promise<number> {
       const account = requireStore().config("active_account");
       return account && await systemSecrets().get("session.current") ? account : null;
     },
-    missing: async () => missingPermissions(await new SessionManager(systemSecrets()).scopes()).map(permission => permission.label),
+    missing: async () => missingPermissions(await new SessionManager(systemSecrets()).permissions() ?? {}).map(permission => permission.label),
     login: async (announce, signal) => {
       const state = requireStore();
       const manager = new SessionManager(systemSecrets(), undefined, account => { state.ensureAccount(account); state.pause(account, "authentication"); });
@@ -66,7 +66,7 @@ export async function runTui(): Promise<number> {
           await tier.refresh();
           let profile: { id: string; name: string | null; email: string | null } = { id: account, name: null, email: null };
           try { profile = await manager.profile(account); } catch { /* 保留 ID。 */ }
-          return { ...profile, scopes: await manager.scopes(), membership: tier.membership };
+          return { ...profile, scopes: await manager.scopes(), permissions: await manager.permissions().catch(() => null), membership: tier.membership };
         },
         // 按当前的默认下载目录计算剩余空间；在设置页改到另一个磁盘后随之更新。
         localFree: async () => {
