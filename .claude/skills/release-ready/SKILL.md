@@ -90,7 +90,7 @@ description: 准备一次发布：核对 release/x.y.z 分支与 package.json �
 逐一检查 `README.md`、`AGENTS.md` 和 `docs/*.md`（不含 `docs/releaseNotes/`），把与本次改动不符的内容改正：
 
 - 功能、按键、命令与选项、支持的平台与产物名、依赖、默认目录。
-- “开发中”“待验收”之类的状态描述与验收表（`docs/acceptance.md`）：以第 2 步的事实为准，不夸大也不遗漏。
+- “开发中”“待验收”之类的状态描述：以第 2 步的事实为准，不夸大也不遗漏；验收与已知问题只写在发布说明里，不另建验收文档。
 - 新功能缺少说明时，补到最相关的文档里，并在 README 中链接。
 
 不要修改 `openspec/specs/` 与 `openspec/changes/archive/`：它们由 OpenSpec 流程维护。
