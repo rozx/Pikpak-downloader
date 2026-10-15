@@ -76,9 +76,10 @@ const pauses: Record<PauseReason, Explanation> = {
 export const pauseExplanation = (pause: Pause): Explanation => pauses[pause.reason];
 
 // 完成优先于取消，取消优先于暂停；失败与等待附带原因。
-export function fileLook(file: FileView, options: { userPaused: boolean }): Look {
+export function fileLook(file: FileView, options: { userPaused: boolean; sharePaused?: boolean }): Look {
   if (file.state === "completed") return stateLooks.completed;
   if (file.cancelled) return { icon: "⊘", tone: "muted", label: "已取消" };
+  if (file.paused || options.sharePaused) return { icon: "⏸", tone: "warning", label: "已暂停" };
   if (options.userPaused && inProgress.includes(file.state)) return { icon: "⏸", tone: "warning", label: "已暂停" };
   const look = stateLooks[file.state];
   if (file.lastError && ["failed", "needs_attention", "retry_wait"].includes(file.state)) return { ...look, label: `${look.label} · ${explain(file.lastError).reason}` };
@@ -86,11 +87,12 @@ export function fileLook(file: FileView, options: { userPaused: boolean }): Look
 }
 
 export type ShareCounts = { total: number; completed: number; downloading: number; transferring: number; queued: number; paused: number; failed: number; waiting: number; cancelled: number };
-export function shareCounts(files: FileView[], userPaused: boolean): ShareCounts {
+export function shareCounts(files: FileView[], userPaused: boolean, sharePaused = false): ShareCounts {
   const counts: ShareCounts = { total: files.length, completed: 0, downloading: 0, transferring: 0, queued: 0, paused: 0, failed: 0, waiting: 0, cancelled: 0 };
   for (const file of files) {
     if (file.state === "completed") counts.completed++;
     else if (file.cancelled) counts.cancelled++;
+    else if (file.paused || sharePaused) counts.paused++;
     else if (inProgress.includes(file.state)) {
       if (userPaused) counts.paused++;
       else if (file.state === "saving" || file.state === "awaiting_remote") counts.transferring++;
@@ -110,10 +112,10 @@ export function buildRows(input: { shares: ShareView[]; files: Record<string, Fi
   for (const share of input.shares) {
     const files = input.files[share.id] ?? [];
     const expanded = input.expanded[share.id] ?? share.summary.status !== "completed";
-    rows.push({ kind: "share", key: `s:${share.id}`, share, counts: shareCounts(files, input.userPaused), expanded });
+    rows.push({ kind: "share", key: `s:${share.id}`, share, counts: shareCounts(files, input.userPaused, share.paused), expanded });
     if (expanded) for (const file of files) {
       rows.push({ kind: "file", key: `f:${file.id}`, shareId: share.id, file, name: fileName(file.relativePath), path: displayPath(file.relativePath),
-        look: fileLook(file, { userPaused: input.userPaused }) });
+        look: fileLook(file, { userPaused: input.userPaused, sharePaused: share.paused }) });
     }
   }
   return rows;
@@ -160,6 +162,9 @@ export function describeEvent(event: RuntimeEvent, names: NameLookup): LogLine |
       const kind = event.reason;
       if (kind === "retry") return { icon: "↻", tone: "active", text: `已安排重试 ${target(event.id)}` };
       if (kind === "cancel") return { icon: "⊘", tone: "muted", text: `已取消 ${target(event.id)}` };
+      if (kind === "pauseTask") return { icon: "⏸", tone: "warning", text: `已暂停 ${target(event.id)}` };
+      if (kind === "resumeTask") return { icon: "▶", tone: "active", text: `已继续 ${target(event.id)}` };
+      if (kind === "startAll") return { icon: "▶", tone: "active", text: "全部开始" };
       if (kind === "pauseQueue") return { icon: "⏸", tone: "warning", text: "队列已暂停" };
       if (kind === "resumeQueue") return { icon: "▶", tone: "active", text: "队列已继续" };
       if (kind === "setOutputRoot") return { icon: "●", tone: "done", text: event.count

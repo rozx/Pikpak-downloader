@@ -214,19 +214,20 @@ function downloading(f: ReturnType<typeof fixture>) {
   f.store.allocateDelivery("account-a", f.file.id, "/fixed-output/tmp", "/fixed-output/final");
 }
 
-test("结构版本 3 升到 4：先备份，旧检查点作为连续前缀保留，区间列为空", () => {
+test("结构版本 3 升到最新：先备份，旧检查点作为连续前缀保留，区间列为空，暂停标记为 0", () => {
   const f = fixture(); downloading(f);
   f.store.checkpoint("account-a", f.file.id, 9007199254740992n, "a".repeat(64));
   f.store.close();
   const legacy = new Database(f.path);
-  legacy.exec("ALTER TABLE deliveries DROP COLUMN ranges_json; PRAGMA user_version=3"); legacy.close();
+  legacy.exec("ALTER TABLE files DROP COLUMN paused; ALTER TABLE shares DROP COLUMN paused; ALTER TABLE deliveries DROP COLUMN ranges_json; PRAGMA user_version=3"); legacy.close();
   const store = f.reopen();
-  expect(SCHEMA_VERSION).toBe(4);
+  expect(SCHEMA_VERSION).toBe(5);
   expect(store.delivery("account-a", f.file.id)).toMatchObject({ checkpoint: 9007199254740992n, prefixSha256: "a".repeat(64) });
   expect(readdirSync(dirname(f.path)).filter(name => name.includes("backup-v3") && name.endsWith(".sqlite"))).toHaveLength(1);
   const db = new Database(f.path, { readonly: true });
   try {
-    expect(Number(db.query("PRAGMA user_version").values()[0]![0])).toBe(4);
+    expect(Number(db.query("PRAGMA user_version").values()[0]![0])).toBe(5);
+    expect(db.query<{ paused: number }, [string]>("SELECT paused FROM files WHERE id=?").get(f.file.id)?.paused).toBe(0);
     expect(db.query<{ ranges: string | null }, [string]>("SELECT ranges_json AS ranges FROM deliveries WHERE file_id=?").get(f.file.id)?.ranges).toBe(null);
   } finally { db.close(); }
 });
@@ -315,5 +316,31 @@ test("改目录时只迁移本地尚未开始的分享：根目录未打开、�
   expect(f.store.share("account-b", other.id).outputRoot).toBe("/fixed-output");
   expect(f.store.moveUnstartedShares("account-a", "/new-output")).toEqual([]);
   expect(() => f.store.moveUnstartedShares("account-a", "")).toThrow();
+});
+
+test("单项暂停：暂停文件与分享、调度跳过暂停项、继续分享清除文件标记、已完成文件忽略、全部开始不改变取消", () => {
+  const f = fixture();
+  const second = f.store.mergeFile(f.scan, { sourceId: "second", gcid: "b".repeat(40), size: 5n, relativePath: "folder/second.bin" });
+  f.store.transition("account-a", f.file.id, "ready"); f.store.transition("account-a", second.id, "ready");
+  expect(f.store.nextFile("account-a")?.id).toBe(f.file.id);
+  f.store.pauseTask("account-a", f.file.id);
+  expect(f.store.nextFile("account-a")?.id).toBe(second.id);
+  expect(f.store.fileViews("account-a", f.share.id).map(view => view.paused)).toEqual([true, false]);
+  f.store.pauseTask("account-a", f.share.id);
+  expect(f.store.nextFile("account-a")).toBe(null); expect(f.store.shareViews("account-a")[0]?.paused).toBe(true);
+  f.store.requestRescan("account-a", f.share.id); expect(f.store.nextScan("account-a")).toBe(null);
+  f.store.resumeTask("account-a", f.share.id);
+  expect(f.store.shareViews("account-a")[0]?.paused).toBe(false);
+  expect(f.store.fileViews("account-a", f.share.id).map(view => view.paused)).toEqual([false, false]);
+  f.store.pauseTask("account-a", second.id); f.store.cancel("account-a", f.file.id);
+  f.store.setConfig("queue_paused", "1");
+  f.store.resumeAllTasks("account-a");
+  expect(f.store.fileViews("account-a", f.share.id).map(view => [view.paused, view.cancelled])).toEqual([[false, true], [false, false]]);
+  expect(() => f.store.pauseTask("account-b", f.file.id)).toThrow();
+  // 已完成的文件忽略暂停：触发器要求完成必须有交付记录，这里绕过触发器把状态改为完成后再暂停。
+  const db = new Database(f.path);
+  db.run("DROP TRIGGER completion_requires_delivery"); db.run("UPDATE files SET state='completed' WHERE id=?", [second.id]); db.close();
+  f.store.pauseTask("account-a", second.id);
+  expect(f.store.fileViews("account-a", f.share.id).find(view => view.id === second.id)?.paused).toBe(false);
 });
 

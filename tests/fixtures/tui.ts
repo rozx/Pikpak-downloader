@@ -16,9 +16,9 @@ export async function eventually(assertion: () => void | Promise<void>, timeout 
 }
 
 export const share = (id: string, title: string, status = "partial", extra: Partial<ShareView> = {}): ShareView => ({ id, title, outputRoot: "C:\\Users\\demo\\Downloads\\PikPak-Test",
-  scanStatus: "complete", cancelled: false, lastError: null, summary: { status, total: 0, completed: 0, cancelled: 0, failed: 0, waiting: 0, active: 0, reason: null }, ...extra });
+  scanStatus: "complete", cancelled: false, lastError: null, summary: { status, total: 0, completed: 0, cancelled: 0, failed: 0, waiting: 0, active: 0, reason: null }, paused: false, ...extra });
 export const file = (id: string, shareId: string, name: string, state: FileState, size: bigint, extra: Partial<FileView> = {}): FileView => ({ id, shareId,
-  relativePath: JSON.stringify([{ id, name }]), size, state, retries: 0n, cancelled: false, lastError: null, checkpoint: 0n, copyState: null, ...extra });
+  relativePath: JSON.stringify([{ id, name }]), size, state, retries: 0n, cancelled: false, lastError: null, checkpoint: 0n, copyState: null, paused: false, ...extra });
 
 // 效果图中的主面板数据：一个下载中、一个失败与等待、一个已完成。
 export function mockSnapshot(): TuiSnapshot {

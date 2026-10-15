@@ -108,7 +108,7 @@ test("v1 升级前生成受保护备份，保留原任务且备份不能直接�
   const f = await fixture();
   try {
     const legacy = new Database(f.path);
-    legacy.exec("ALTER TABLE deliveries DROP COLUMN ranges_json; DROP TABLE name_reservations; DROP TABLE directories; DROP INDEX file_share_identity; ALTER TABLE shares DROP COLUMN root_volume; ALTER TABLE shares DROP COLUMN root_identity; ALTER TABLE shares DROP COLUMN title; ALTER TABLE operations DROP COLUMN payload_json; ALTER TABLE copies DROP COLUMN evidence_json; ALTER TABLE deliveries DROP COLUMN plan_json; DROP TABLE scan_pages; DROP TABLE scan_directories; DROP TABLE scan_issues; ALTER TABLE shares DROP COLUMN last_error; PRAGMA user_version=1"); legacy.close();
+    legacy.exec("ALTER TABLE files DROP COLUMN paused; ALTER TABLE shares DROP COLUMN paused; ALTER TABLE deliveries DROP COLUMN ranges_json; DROP TABLE name_reservations; DROP TABLE directories; DROP INDEX file_share_identity; ALTER TABLE shares DROP COLUMN root_volume; ALTER TABLE shares DROP COLUMN root_identity; ALTER TABLE shares DROP COLUMN title; ALTER TABLE operations DROP COLUMN payload_json; ALTER TABLE copies DROP COLUMN evidence_json; ALTER TABLE deliveries DROP COLUMN plan_json; DROP TABLE scan_pages; DROP TABLE scan_directories; DROP TABLE scan_issues; ALTER TABLE shares DROP COLUMN last_error; PRAGMA user_version=1"); legacy.close();
     f.reopen();
     expect(f.store.share("account", f.share.id).secretRef).toBe(f.share.secretRef);
     const backups = (await readdir(f.directory)).filter(name => name.includes("backup-v1") && name.endsWith(".sqlite"));

@@ -100,7 +100,7 @@ export function Banners({ snapshot, theme }: { snapshot: TuiSnapshot; theme: The
   const system = snapshot.systemPause ? pauseExplanation(snapshot.systemPause) : null;
   return (
     <>
-      {snapshot.userPaused && <Text wrap="truncate-end">{badge("⏸ 队列已暂停")}<Text {...theme.paint("warning")}>  当前下载已在安全点停止，断点已保存。按 </Text><Text {...theme.paint("key")} bold>p</Text><Text {...theme.paint("warning")}> 继续</Text></Text>}
+      {snapshot.userPaused && <Text wrap="truncate-end">{badge("⏸ 队列已暂停")}<Text {...theme.paint("warning")}>  当前下载已在安全点停止，断点已保存。按 </Text><Text {...theme.paint("key")} bold>P</Text><Text {...theme.paint("warning")}> 全部开始</Text></Text>}
       {system && <Text wrap="truncate-end">{badge("⏸ 执行已暂停")}<Text {...theme.paint("warning")}>  {system.reason}。{system.advice}</Text></Text>}
     </>
   );

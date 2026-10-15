@@ -25,7 +25,7 @@ test("主面板：标题栏、分组、进度、事件区与按键提示", async
   for (const part of ["PikPak Downloader", "● 已登录", "云盘 21.0 GB / 10 TB", "本地剩余 412.0 GB", "剪贴板 ● 监听中",
     "▼ 「某某合集」  1/3 完成 · 1 下载中 · 1 排队", "▼ 「纪录片合集」  0/2 完成 · 1 失败 · 1 等待", "▶ 「另一个分享」  2/2 完成",
     "48%  198 MB/412 MB  2.7 MB/s  1分19秒", "失败 · 下载地址多次刷新后仍被拒绝", "等待云端空间",
-    "22:33:40  ✓ episode01.mkv 校验通过，已完成", "Enter 详情", "p 暂停"]) expect(text).toContain(part);
+    "22:33:40  ✓ episode01.mkv 校验通过，已完成", "Enter 详情", "p 暂停", "P 全部暂停"]) expect(text).toContain(part);
   expect(text).not.toContain("readme.txt");
 });
 
@@ -50,7 +50,7 @@ test("用户暂停与系统暂停分别显示横幅，暂停中的下载行标�
   const { frame } = mount(controller); await settle();
   const text = frame();
   expect(text).toContain("⏸ 队列已暂停"); expect(text).toContain("⏸ 执行已暂停"); expect(text).toContain("登录已失效，执行已暂停。重新启动程序并完成浏览器登录。");
-  expect(text).toContain("48%  已暂停"); expect(text).toContain("1 暂停"); expect(text).toContain("p 继续");
+  expect(text).toContain("48%  已暂停"); expect(text).toContain("1 暂停"); expect(text).toContain("P 全部开始"); expect(text).toContain("按 P 全部开始");
   controller.update({ userPaused: false, systemPause: null }); await settle();
   expect(frame()).not.toContain("⏸ 队列已暂停"); expect(frame()).not.toContain("执行已暂停");
 });
@@ -83,12 +83,12 @@ test("取消需要确认：y 下发取消，n 与 Esc 返回；已完成文件�
 
 test("暂停与继续、重试、打开目录及操作失败提示", async () => {
   const { controller, frame, press } = mount(); await settle();
-  await press(keys.down, "p", "r", "o");
+  await press(keys.down, "P", "r", "o");
   expect(controller.commands).toEqual([{ kind: "pauseQueue" }, { kind: "retry", id: "f_2" }]);
   expect(controller.opened).toEqual([{ shareId: "s_1", fileId: "f_2" }]);
   controller.update({ userPaused: true }); await settle();
   expect(frame()).toContain("⏸ 队列已暂停");
-  await press("p"); expect(controller.commands.at(-1)).toEqual({ kind: "resumeQueue" });
+  await press("P"); expect(controller.commands.at(-1)).toEqual({ kind: "startAll" });
   controller.openResult = { ok: false, reason: "output_unavailable" }; await press("o");
   expect(controller.notes.at(-1)?.text).toBe("无法打开目录：下载目录不可用或不可写");
   controller.result = { ok: false, reason: "invalid_transition" }; await press("r");
@@ -294,5 +294,26 @@ test("同时下载数大于 1 时标题栏显示在途文件数与合计速度�
   // 暂停时不显示。
   const paused = mount(new FakeController({ ...concurrentSnapshot(), userPaused: true }), { columns: 100, rows: 24 }); await settle();
   expect(paused.frame().split("\n")[0]).not.toContain("下载中");
+});
+
+test("p 暂停或继续选中的文件或分享，P 在有暂停时全部开始；暂停项显示已暂停", async () => {
+  const controller = new FakeController();
+  const { frame, press } = mount(controller); await settle();
+  await press(keys.down, "p");
+  expect(controller.commands.at(-1)).toEqual({ kind: "pauseTask", id: "f_2" });
+  const paused = mockSnapshot();
+  paused.files.s_1 = paused.files.s_1!.map(item => item.id === "f_2" ? { ...item, paused: true } : item);
+  controller.update({ files: paused.files }); await settle();
+  const row = frame().split("\n").find(line => line.includes("episode02.mkv")) ?? "";
+  expect(row).toContain("⏸"); expect(row).toContain("已暂停");
+  expect(frame()).toContain("p 继续"); expect(frame()).toContain("P 全部开始");
+  await press("p"); expect(controller.commands.at(-1)).toEqual({ kind: "resumeTask", id: "f_2" });
+  await press("P"); expect(controller.commands.at(-1)).toEqual({ kind: "startAll" });
+  // 暂停分享：分享行显示已暂停，文件行都显示已暂停；在文件上按 p 继续该分享。
+  controller.update({ files: mockSnapshot().files, shares: mockSnapshot().shares.map(item => item.id === "s_1" ? { ...item, paused: true } : item) }); await settle();
+  expect(frame()).toContain("「某某合集」"); expect(frame().split("\n").find(line => line.includes("「某某合集」"))).toContain("· 已暂停");
+  expect(frame().split("\n").find(line => line.includes("episode03.mkv"))).toContain("已暂停");
+  await press("p"); expect(controller.commands.at(-1)).toEqual({ kind: "resumeTask", id: "s_1" });
+  await press(keys.up, "p"); expect(controller.commands.at(-1)).toEqual({ kind: "resumeTask", id: "s_1" });
 });
 

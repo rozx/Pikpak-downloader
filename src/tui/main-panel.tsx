@@ -17,7 +17,7 @@ export function panelLayout(size: Size, snapshot: TuiSnapshot, overlayLines = 0)
 const nameWidthFor = (columns: number) => Math.max(18, Math.min(48, columns - 72));
 
 // 选中行的全部文字都改用选中调色板，保证在选中背景上可读。
-function CountsText({ counts, theme, scanning, cancelled, selected, frame }: { counts: ShareCounts; theme: Theme; scanning: boolean; cancelled: boolean; selected: boolean; frame: number | null }) {
+function CountsText({ counts, theme, scanning, cancelled, paused, selected, frame }: { counts: ShareCounts; theme: Theme; scanning: boolean; cancelled: boolean; paused: boolean; selected: boolean; frame: number | null }) {
   const paint = (tone: Tone) => theme.paint(tone, selected);
   const part = (value: number, text: string, tone: Tone) => value > 0 ? <Text {...paint(tone)}> · {value} {text}</Text> : null;
   if (scanning && counts.total === 0) return <Text {...paint("scan")}>  {frame === null ? "" : `${SPINNER[frame]} `}扫描中…</Text>;
@@ -27,6 +27,7 @@ function CountsText({ counts, theme, scanning, cancelled, selected, frame }: { c
       {part(counts.downloading, "下载中", "active")}{part(counts.transferring, "转存中", "transfer")}{part(counts.paused, "暂停", "warning")}
       {part(counts.queued, "排队", "muted")}{part(counts.failed, "失败", "error")}{part(counts.waiting, "等待", "warning")}{part(counts.cancelled, "已取消", "muted")}
       {cancelled && <Text {...paint("muted")}> · 分享已取消</Text>}
+      {paused && !cancelled && <Text {...paint("warning")}> · 已暂停</Text>}
     </Text>
   );
 }
@@ -62,7 +63,7 @@ export function RowLine({ row, selected, snapshot, theme, columns, frame = null 
           <Text wrap="truncate-end">
             <Text {...theme.paint("muted", selected)}>{row.expanded ? "▼ " : "▶ "}</Text>
             <Text {...theme.paint("strong", selected)} bold {...textHighlight(theme.selection, selected)}>「{row.share.title ?? row.share.id}」</Text>
-            <CountsText counts={row.counts} theme={theme} scanning={row.share.scanStatus !== "complete"} cancelled={row.share.cancelled} selected={selected} frame={frame} />
+            <CountsText counts={row.counts} theme={theme} scanning={row.share.scanStatus !== "complete"} cancelled={row.share.cancelled} paused={row.share.paused} selected={selected} frame={frame} />
           </Text>
         </Box>
         <Box flexGrow={1} justifyContent="flex-end" flexShrink={0} marginLeft={2}><Text {...theme.paint("muted", selected)}>{path}</Text></Box>

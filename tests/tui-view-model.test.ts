@@ -5,10 +5,10 @@ import { buildRows, describeEvent, explain, fileLook, knownReasons, pauseExplana
 
 const summary = (status: string, total: number, completed: number) => ({ status, total, completed, cancelled: 0, failed: 0, waiting: 0, active: total - completed, reason: null });
 const share = (id: string, status: string, total: number, completed: number): ShareView =>
-  ({ id, title: `分享${id}`, outputRoot: "/out", scanStatus: "complete", cancelled: false, lastError: null, summary: summary(status, total, completed) });
+  ({ id, title: `分享${id}`, outputRoot: "/out", scanStatus: "complete", cancelled: false, lastError: null, summary: summary(status, total, completed), paused: false });
 const file = (id: string, state: FileState, extra: Partial<FileView> = {}): FileView =>
   ({ id, shareId: "s_1", relativePath: JSON.stringify([{ id, name: "季" }, { id, name: `${id}.mkv` }]), size: 100n, state, retries: 0n, cancelled: false,
-    lastError: null, checkpoint: 0n, copyState: null, ...extra });
+    lastError: null, checkpoint: 0n, copyState: null, paused: false, ...extra });
 
 test("每种文件状态都有图标、色调与说明；取消、暂停与完成优先级正确", () => {
   for (const state of fileStates) {

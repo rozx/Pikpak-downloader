@@ -14,7 +14,8 @@ export type SessionCommand =
   | { kind: "retry"; id: string } | { kind: "cancel"; id: string }
   | { kind: "pauseQueue" } | { kind: "resumeQueue" }
   | { kind: "submitText"; text: string } | { kind: "setOutputRoot"; path: string }
-  | { kind: "setClipboardWatch"; enabled: boolean } | { kind: "setDownloadConnections"; count: number } | { kind: "setActiveFiles"; count: number };
+  | { kind: "setClipboardWatch"; enabled: boolean } | { kind: "setDownloadConnections"; count: number } | { kind: "setActiveFiles"; count: number }
+  | { kind: "pauseTask"; id: string } | { kind: "resumeTask"; id: string } | { kind: "startAll" };
 export type CommandResult = { ok: true; ids: string[]; issues: string[] } | { ok: false; reason: string };
 // stopActive / isPooled 对应下载池（add-concurrent-file-downloads）；只有串行执行器的测试替身可以不提供。
 export type SessionEngine = Pick<Engine, "step" | "resumeLocalPause" | "resumeTrafficPause" | "reconcile" | "blockPersistence" | "subscribe">
@@ -67,7 +68,7 @@ export class RuntimeSession {
   // 需要先停下当前串行步骤的命令；下载池中的目标由 apply 中的 stopActive 停下，不必中断步骤。
   private interrupts(command: SessionCommand): boolean {
     if (command.kind === "pauseQueue") return true;
-    return command.kind === "cancel" && (command.id === this.active.fileId || command.id === this.active.shareId);
+    return (command.kind === "cancel" || command.kind === "pauseTask") && (command.id === this.active.fileId || command.id === this.active.shareId);
   }
 
   async run(signal: AbortSignal): Promise<void> {
@@ -132,6 +133,12 @@ export class RuntimeSession {
         this.store.cancel(account, command.id); this.store.recheckCancelledPause(account);
         await this.engine.stopActive?.(target => target.fileId === command.id || target.shareId === command.id);
       } else if (command.kind === "pauseQueue") { this.store.setConfig("queue_paused", "1"); await this.engine.stopActive?.(); }
+      else if (command.kind === "pauseTask") {
+        // 与取消相同：先写暂停标记，再停下下载池中的目标。
+        this.store.pauseTask(account, command.id);
+        await this.engine.stopActive?.(target => target.fileId === command.id || target.shareId === command.id);
+      } else if (command.kind === "resumeTask") this.store.resumeTask(account, command.id);
+      else if (command.kind === "startAll") { this.store.setConfig("queue_paused", "0"); this.store.resumeAllTasks(account); }
       else if (command.kind === "resumeQueue") this.store.setConfig("queue_paused", "0");
       else if (command.kind === "setOutputRoot") {
         const root = await writableDirectory(command.path);

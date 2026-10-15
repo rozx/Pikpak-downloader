@@ -1,7 +1,7 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { AppError } from "../errors";
-import { APPLICATION_ID, SCHEMA_VERSION, schema, migrationFrom1, migrationFrom2, migrationFrom3 } from "./schema";
+import { APPLICATION_ID, SCHEMA_VERSION, schema, migrationFrom1, migrationFrom2, migrationFrom3, migrationFrom4 } from "./schema";
 import { migrationBackup } from "./migration-backup";
 import { CHUNK_SIZE, parseRanges, persistedBytes, rangesValid, serializeRanges, type RangeCheckpoint } from "./ranges";
 import { aggregateCounts, assertTransition, canResume, type Counts, type FileState, type Pause, type PauseReason } from "./model";
@@ -29,9 +29,10 @@ export type Delivery = { fileId: string; tempPath: string; targetPath: string; c
 export type ConfigKey = "active_account" | "output_root" | "queue_paused" | "clipboard_watch" | "download_connections" | "max_active_files" | "account_tier";
 export type ShareSummary = ReturnType<typeof aggregateCounts> & { reason: string | null };
 export type ShareView = { id: string; title: string | null; outputRoot: string; scanStatus: Share["scanStatus"]; cancelled: boolean;
-  lastError: string | null; summary: ShareSummary };
+  lastError: string | null; summary: ShareSummary; paused: boolean };
+// paused 只表示文件自己的单项暂停；所属分享是否暂停见 ShareView.paused。
 export type FileView = Pick<FileRecord, "id" | "shareId" | "relativePath" | "size" | "state" | "retries" | "cancelled" | "lastError">
-  & { checkpoint: bigint; copyState: CopyRecord["state"] | null };
+  & { checkpoint: bigint; copyState: CopyRecord["state"] | null; paused: boolean };
 type ShareRow = Omit<Share, "cancelled"> & { cancelled: bigint };
 type FileRow = Omit<FileRecord, "size" | "cancelled"> & { size: string; cancelled: bigint };
 const shareColumns = "id, account_id AS accountId, remote_id AS remoteId, output_root AS outputRoot, secret_ref AS secretRef, requested_revision AS requestedRevision, attempted_revision AS attemptedRevision, cancelled, scan_status AS scanStatus, last_error AS lastError";
@@ -65,6 +66,7 @@ export class Store {
             if (version <= 1n) this.db.exec(migrationFrom1);
             if (version <= 2n) this.db.exec(migrationFrom2);
             if (version <= 3n) this.db.exec(migrationFrom3);
+            if (version <= 4n) this.db.exec(migrationFrom4);
             this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
           })();
         } else if (version !== BigInt(SCHEMA_VERSION)) throw new AppError("state_unavailable");
@@ -120,7 +122,7 @@ export class Store {
   }
   nextScan(accountId: string, now = Date.now()): Scan | null {
     const next = this.get<{ id: string }>(`SELECT s.id FROM shares s LEFT JOIN scans g ON g.share_id=s.id AND g.status='active'
-      WHERE s.account_id=? AND s.cancelled=0 AND (s.requested_revision>s.attempted_revision OR
+      WHERE s.account_id=? AND s.cancelled=0 AND s.paused=0 AND (s.requested_revision>s.attempted_revision OR
       (g.id IS NOT NULL AND COALESCE(json_extract(g.cursor_json,'$.retryAt'),0)<=?)) ORDER BY s.created_at,s.id LIMIT 1`, accountId, now);
     if (!next) return null;
     const share = this.share(accountId, next.id);
@@ -137,6 +139,7 @@ export class Store {
   // exclude：已在下载池中的文件，不再重复调度。
   nextFile(accountId: string, now = Date.now(), exclude: string[] = []): FileRecord | null {
     const row = this.get<{ id: string }>(`SELECT f.id FROM files f JOIN shares s ON s.id=f.share_id WHERE f.account_id=? AND f.cancelled=0 AND s.cancelled=0
+      AND f.paused=0 AND s.paused=0
       AND f.state IN ('discovered','ready','saving','awaiting_remote','downloading','verifying','publishing','reconciling','retry_wait','waiting_space')
       AND (f.retry_at IS NULL OR f.retry_at<=?) AND f.id NOT IN (SELECT value FROM json_each(?))
       ORDER BY CASE WHEN f.state IN ('publishing','reconciling') THEN 0 ELSE 1 END,f.rowid LIMIT 1`, accountId, now, JSON.stringify(exclude));
@@ -487,6 +490,25 @@ export class Store {
     const delivery = this.delivery(accountId, fileId);
     return delivery ? persistedBytes(delivery.checkpoint, delivery.ranges) : 0n;
   }
+  // 单项暂停（add-task-controls 决策 2）：暂停文件只标记文件，暂停分享只标记分享；继续分享同时清除其文件的标记。已完成的文件忽略暂停。
+  pauseTask(accountId: string, id: string): void {
+    if (id.startsWith("s_")) { this.share(accountId, id); this.run("UPDATE shares SET paused=1 WHERE id=?", id); }
+    else { this.file(accountId, id); this.run("UPDATE files SET paused=1 WHERE id=? AND state<>'completed'", id); }
+  }
+  resumeTask(accountId: string, id: string): void {
+    this.transaction(() => {
+      if (id.startsWith("s_")) {
+        this.share(accountId, id);
+        this.run("UPDATE shares SET paused=0 WHERE id=?", id); this.run("UPDATE files SET paused=0 WHERE share_id=?", id);
+      } else { this.file(accountId, id); this.run("UPDATE files SET paused=0 WHERE id=?", id); }
+    });
+  }
+  // 全部开始：清除全部单项暂停，不改变取消标记。
+  resumeAllTasks(accountId: string): void {
+    this.transaction(() => {
+      this.run("UPDATE shares SET paused=0 WHERE account_id=?", accountId); this.run("UPDATE files SET paused=0 WHERE account_id=?", accountId);
+    });
+  }
   cancel(accountId: string, id: string): void {
     this.transaction(() => {
       if (id.startsWith("s_")) {
@@ -532,14 +554,14 @@ export class Store {
   }
   // 界面只读视图：仅含 SELECT，只读连接也可调用。
   shareViews(accountId: string): ShareView[] {
-    return this.all<ShareRow & { title: string | null }>(`SELECT ${shareColumns}, title FROM shares WHERE account_id=? ORDER BY created_at,id`, accountId)
+    return this.all<ShareRow & { title: string | null; paused: bigint }>(`SELECT ${shareColumns}, title, paused FROM shares WHERE account_id=? ORDER BY created_at,id`, accountId)
       .map(row => ({ id: row.id, title: row.title, outputRoot: row.outputRoot, scanStatus: row.scanStatus, cancelled: row.cancelled === 1n,
-        lastError: row.lastError, summary: this.summary(accountId, row.id) }));
+        lastError: row.lastError, summary: this.summary(accountId, row.id), paused: row.paused === 1n }));
   }
   fileViews(accountId: string, shareId: string): FileView[] {
     this.share(accountId, shareId);
     // 文件可能先后关联多份副本，显示最近一次转存产生的那份。
-    return this.all<FileRow & { checkpoint: string; rangesJson: string | null; copyState: CopyRecord["state"] | null }>(`SELECT ${fileColumns},
+    return this.all<FileRow & { checkpoint: string; rangesJson: string | null; copyState: CopyRecord["state"] | null; paused: bigint }>(`SELECT ${fileColumns}, paused,
       COALESCE((SELECT checkpoint FROM deliveries WHERE file_id=files.id),'0') AS checkpoint,
       (SELECT ranges_json FROM deliveries WHERE file_id=files.id) AS rangesJson,
       (SELECT c.state FROM copies c JOIN copy_references r ON r.copy_id=c.id JOIN operations o ON o.id=c.operation_id
@@ -548,7 +570,8 @@ export class Store {
       .map(row => {
         const file = fileValue(row), prefix = BigInt(row.checkpoint);
         return { id: file.id, shareId: file.shareId, relativePath: file.relativePath, size: file.size, state: file.state, retries: file.retries,
-          cancelled: file.cancelled, lastError: file.lastError, checkpoint: persistedBytes(prefix, parseRanges(row.rangesJson, prefix, file.size)), copyState: row.copyState };
+          cancelled: file.cancelled, lastError: file.lastError, checkpoint: persistedBytes(prefix, parseRanges(row.rangesJson, prefix, file.size)), copyState: row.copyState,
+          paused: row.paused === 1n };
       });
   }
   pause(accountId: string, reason: PauseReason, fileId: string | null = null): void {

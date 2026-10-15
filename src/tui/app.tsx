@@ -27,6 +27,10 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   const found = rows.findIndex(row => row.key === selectedKey);
   const selected = found >= 0 ? found : Math.min(Math.max(0, rows.findIndex(row => row.kind === "file")), Math.max(0, rows.length - 1));
   const row = rows[selected];
+  // 只要队列暂停或存在单项暂停，P 就是“全部开始”。
+  const anyPaused = snapshot.userPaused || snapshot.shares.some(item => item.paused) || Object.values(snapshot.files).some(files => files.some(file => file.paused));
+  const selectedPaused = (item: Row) => item.kind === "share" ? item.share.paused
+    : item.file.paused || !!snapshot.shares.find(share => share.id === item.shareId)?.paused;
   const overlayLines = screen.kind === "confirm" || screen.kind === "quit" ? CONFIRM_LINES : screen.kind === "paste" ? PASTE_BOX_LINES : 0;
   const { listHeight } = panelLayout(size, snapshot, overlayLines);
   const effectiveOffset = scrollOffset(offset, selected, listHeight, rows.length);
@@ -76,7 +80,12 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
       else setScreen({ kind: "detail", fileId: row.file.id });
     } else if (input === "r" && row) void run({ kind: "retry", id: row.kind === "share" ? row.share.id : row.file.id });
     else if (input === "c") askCancel(row, { kind: "main" });
-    else if (input === "p") void run(snapshot.userPaused ? { kind: "resumeQueue" } : { kind: "pauseQueue" });
+    else if (input === "p" && row) {
+      // 选中项暂停或继续；文件自己未暂停但所属分享暂停时，继续该分享。
+      const share = snapshot.shares.find(item => item.id === (row.kind === "share" ? row.share.id : row.shareId));
+      const target = row.kind === "share" ? row.share.id : row.file.paused || !share?.paused ? row.file.id : share.id;
+      void run(selectedPaused(row) ? { kind: "resumeTask", id: target } : { kind: "pauseTask", id: target });
+    } else if (input === "P") void run(anyPaused ? { kind: "startAll" } : { kind: "pauseQueue" });
     else if (input === "o") void open(row);
     else if (input === "a") { setDraft(""); setPasteMessage(null); setScreen({ kind: "paste" }); }
     else if (input === "s") { setSetting({ selected: 0, editing: false, error: null }); setScreen({ kind: "settings" }); }
@@ -159,7 +168,8 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   const keys: Array<[string, string]> = screen.kind === "confirm" ? [["y", "确认"], ["n", "返回"]]
     : screen.kind === "quit" ? [["y", "退出"], ["n", "返回"]]
     : screen.kind === "paste" ? [["Enter", "提交"], ["Esc", "取消"]]
-    : [["↑↓", "选择"], ["←→", "折叠"], ["Enter", "详情"], ["r", "重试"], ["c", "取消"], ["p", snapshot.userPaused ? "继续" : "暂停"], ["o", "目录"], ["a", "粘贴"], ["s", "设置"], ["q", "退出"]];
+    : [["↑↓", "选择"], ["←→", "折叠"], ["Enter", "详情"], ["r", "重试"], ["c", "取消"], ["p", row && selectedPaused(row) ? "继续" : "暂停"],
+      ["P", anyPaused ? "全部开始" : "全部暂停"], ["o", "目录"], ["a", "粘贴"], ["s", "设置"], ["q", "退出"]];
   const overlay = screen.kind === "confirm"
     ? <ConfirmDialog heading="取消任务" title={screen.title} detail="本地文件、断点和云端副本都会保留，之后可用 r 恢复。" confirm="确认取消" theme={theme} />
     : screen.kind === "quit" ? <ConfirmDialog heading="退出程序" title="停止下载并退出？" detail="当前下载会在安全点停止并保存断点，下次启动继续。" confirm="停止并退出" theme={theme} />

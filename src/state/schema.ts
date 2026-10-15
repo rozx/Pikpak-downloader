@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 export const APPLICATION_ID = 0x504b444c;
 const scanProgressSchema = `
 CREATE TABLE scan_directories(scan_id TEXT NOT NULL REFERENCES scans(id), remote_id TEXT NOT NULL, path_json TEXT NOT NULL,
@@ -28,6 +28,8 @@ ALTER TABLE deliveries ADD COLUMN plan_json TEXT NOT NULL DEFAULT '{}';
 ${localPathSchema}`;
 // 版本 4：分段下载检查点的区间与下载模式，见 src/state/ranges.ts。
 export const migrationFrom3 = "ALTER TABLE deliveries ADD COLUMN ranges_json TEXT;";
+// 版本 5：文件与分享的单项暂停（add-task-controls 决策 2）。
+export const migrationFrom4 = "ALTER TABLE files ADD COLUMN paused INTEGER NOT NULL DEFAULT 0 CHECK(paused IN (0,1)); ALTER TABLE shares ADD COLUMN paused INTEGER NOT NULL DEFAULT 0 CHECK(paused IN (0,1));";
 export const schema = `
 CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
 INSERT INTO metadata VALUES('backup_review_required', '0');
@@ -41,6 +43,7 @@ CREATE TABLE shares(
   cancelled INTEGER NOT NULL DEFAULT 0 CHECK(cancelled IN (0,1)),
   scan_status TEXT NOT NULL DEFAULT 'pending' CHECK(scan_status IN ('pending','active','complete','failed')),
   created_at INTEGER NOT NULL, last_error TEXT, root_volume TEXT, root_identity TEXT, title TEXT,
+  paused INTEGER NOT NULL DEFAULT 0 CHECK(paused IN (0,1)),
   UNIQUE(account_id,remote_id), UNIQUE(id,account_id)
 ) STRICT;
 CREATE TABLE scans(
@@ -59,6 +62,7 @@ CREATE TABLE files(
   state TEXT NOT NULL DEFAULT 'discovered' CHECK(state IN ('discovered','ready','saving','awaiting_remote','downloading','verifying','publishing','completed','waiting_space','retry_wait','failed','reconciling','needs_attention')),
   retries INTEGER NOT NULL DEFAULT 0 CHECK(retries >= 0), retry_at INTEGER,
   cancelled INTEGER NOT NULL DEFAULT 0 CHECK(cancelled IN (0,1)), last_error TEXT,
+  paused INTEGER NOT NULL DEFAULT 0 CHECK(paused IN (0,1)),
   FOREIGN KEY(share_id,account_id) REFERENCES shares(id,account_id), UNIQUE(id,account_id), UNIQUE(share_id,source_id,size,gcid)
 ) STRICT;
 CREATE TABLE scan_files(scan_id TEXT NOT NULL REFERENCES scans(id), file_id TEXT NOT NULL REFERENCES files(id), PRIMARY KEY(scan_id,file_id)) STRICT;

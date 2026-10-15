@@ -240,3 +240,31 @@ test("设置下载连接数：合法值写入任务库，越界值被拒绝并�
   } finally { abort.abort(); await running; await f.close(); }
 });
 
+test("单项暂停：暂停当前执行项先中断步骤；暂停与继续其他项立即生效；全部开始清除队列与单项暂停", async () => {
+  const f = await storeFixture(); const log: string[] = []; let steps = 0;
+  const fake = fakeEngine(async signal => {
+    const index = ++steps;
+    if (index > 1) { await Bun.sleep(5); return false; }
+    fake.emit({ type: "downloading", id: f.first.id }); log.push("step-start");
+    await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
+    log.push("step-aborted"); return false;
+  });
+  const session = new RuntimeSession(f.store, "account", fake.engine, f.receiver, fakeClipboard().clipboard);
+  session.subscribe(event => { if (event.type === "command") log.push(`command:${event.reason}`); });
+  const abort = new AbortController(); const running = session.run(abort.signal);
+  try {
+    await until(() => log.includes("step-start"));
+    expect((await session.command({ kind: "pauseTask", id: f.second.id })).ok).toBe(true);
+    expect(log).toEqual(["step-start", "command:pauseTask"]);
+    expect((await session.command({ kind: "pauseTask", id: f.first.id })).ok).toBe(true);
+    expect(log).toEqual(["step-start", "command:pauseTask", "step-aborted", "command:pauseTask"]);
+    expect(f.store.fileViews("account", f.share.id).map(view => view.paused)).toEqual([true, true]);
+    expect((await session.command({ kind: "resumeTask", id: f.second.id })).ok).toBe(true);
+    expect(f.store.fileViews("account", f.share.id).map(view => view.paused)).toEqual([true, false]);
+    f.store.setConfig("queue_paused", "1");
+    expect((await session.command({ kind: "startAll" })).ok).toBe(true);
+    expect(f.store.config("queue_paused")).toBe("0");
+    expect(f.store.fileViews("account", f.share.id).map(view => view.paused)).toEqual([false, false]);
+  } finally { abort.abort(); await running; await f.close(); }
+});
+
