@@ -62,7 +62,7 @@ export class FakeController implements TuiController {
   command = async (command: SessionCommand) => { this.commands.push(command); return this.result; };
   note = (line: LogLine) => { this.notes.push(line); };
   preview = (text: string) => pastePreview(text);
-  targetPath = (fileId: string) => fileId === "f_4" ? "C:\\Users\\demo\\Downloads\\PikPak-Test\\纪录片合集\\part1.mp4" : null;
+  targetPath = (fileId: string): string | null => fileId === "f_4" ? "C:\\Users\\demo\\Downloads\\PikPak-Test\\纪录片合集\\part1.mp4" : null;
   openDirectory = async (target: { shareId: string; fileId?: string }) => { this.opened.push(target); return this.openResult; };
   releasePreview = (id: string | null) => { this.previews.push(id ?? "*"); return this.release; };
   refreshAccount = () => { this.accountRefreshes++; };
