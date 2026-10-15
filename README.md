@@ -64,6 +64,6 @@ macOS 原生构建需要 Xcode Command Line Tools 和 Node-API 头文件；可�
 
 独立构建包含 Bun 运行时。Windows 构建成功不代表实际运行或原生适配通过；真实多页嵌套与完整故障场景、Windows/其他架构运行分别保留 OpenSpec 任务 8.2、8.3 的发布验收。
 
-状态与恢复边界见 [说明](docs/state-and-recovery.md)，脱敏可行性证据见 [设计](openspec/changes/archive/2026-10-15-add-clipboard-download-workflow/design.md)。`spikes/` 是隔离验证程序，测试资料只从本机系统凭据库读取，不提交真实分享或凭据。
+状态与恢复边界见 [说明](docs/state-and-recovery.md)，脱敏可行性证据见 [设计](openspec/changes/archive/2026-10-15-add-clipboard-download-workflow/design.md)。
 
 完整的实测、合成测试与待验收边界见[验收状态](docs/acceptance.md)。

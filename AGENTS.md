@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents (Claude Code and others) when working with code in this repository.
 
 PikPak 分享下载器。它监听剪贴板（或接收粘贴）中的完整分享文本，把文件逐个转存到用户的 PikPak 云盘，再下载、校验并发布到本地。云盘只作中转空间，本工具创建的副本可以按需自动回收，也可以手动释放。
 
@@ -32,6 +32,10 @@ bun run build bun-windows-x64                  # 单文件产物输出到 dist/�
   - 校验命令：`openspec validate <name> --strict`。
   - 计划只写在变更的 `tasks.md` 里，不另建计划文档。
 - 直接提交到 main，标题采用 conventional commits 风格。
+- 记得升级版本号。版本只有一个来源：`package.json` 的 `version`，CLI `--version`、界面标题与 `src/about.ts` 都读它。
+  - 新功能升次版本号，修复升修订号（当前处于 0.x 阶段）。
+  - 用单独的 `chore: bump version to x.y.z` 提交记录。
+  - `tests/lifecycle.test.ts` 直接读取 `package.json`，升级版本号不用改测试。
 - 分享链接、提取码、令牌和签名下载地址不得出现在输出、日志、事件或测试快照里。凭据只存放在系统受保护存储中，任务库只保存引用。
 
 ## 架构
