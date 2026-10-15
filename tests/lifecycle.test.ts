@@ -6,13 +6,15 @@ import { acquireQueueLock } from "../src/state/lock";
 
 test("前台主循环收到 SIGINT 后关闭监听并释放执行锁", async () => {
   const root = await mkdtemp(join(tmpdir(), "pikpak-watch-test-"));
-  const child = Bun.spawn([process.execPath, "tests/fixtures/watch-worker.ts", root], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+  const child = Bun.spawn([process.execPath, "tests/fixtures/watch-worker.ts", root], { stdin: "pipe", stdout: "pipe", stderr: "ignore" });
   const reader = child.stdout.getReader(); let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const ready = await Promise.race([reader.read(), new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(Error("start-timeout")), 5000); })]);
     if (timeout) clearTimeout(timeout);
     expect(new TextDecoder().decode(ready.value)).toContain("ready");
-    child.kill("SIGINT");
+    // Windows 上真实 Ctrl+C 走控制台事件，由实机验收覆盖；这里经标准输入触发同一 SIGINT 处理。
+    if (process.platform === "win32") { child.stdin.write("SIGINT\n"); await child.stdin.flush(); }
+    else child.kill("SIGINT");
     const exit = await Promise.race([child.exited, new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(Error("stop-timeout")), 3000); })]);
     expect(exit).toBe(0);
     const lock = acquireQueueLock(join(root, "queue-lock.sqlite")); lock.release();

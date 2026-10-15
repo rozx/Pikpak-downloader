@@ -9,7 +9,7 @@
 
 ## 2. Test Baseline and Dependencies
 
-- [ ] 2.1 修复 Windows 上的测试套件：查明并消除 `Store` 关闭后临时目录仍被占用导致的 `EBUSY` 清理失败；生命周期测试在 Windows 上无法用 `child.kill("SIGINT")` 模拟控制台 Ctrl+C，改为平台可行的方式或明确标注平台跳过并保留实机验证项。验收：Windows 上 `bun test tests` 除明确标注的平台跳过外全部通过；不得通过放宽断言掩盖问题。
+- [x] 2.1 修复 Windows 上的测试套件：查明并消除 `Store` 关闭后临时目录仍被占用导致的 `EBUSY` 清理失败；生命周期测试在 Windows 上无法用 `child.kill("SIGINT")` 模拟控制台 Ctrl+C，改为平台可行的方式或明确标注平台跳过并保留实机验证项。验收：Windows 上 `bun test tests` 除明确标注的平台跳过外全部通过；不得通过放宽断言掩盖问题。结果：`EBUSY` 由 Bun 1.3.8 引起，1.4.2 下消失；引擎、传输、工作区共 19 项原仅限 macOS 的测试改用按平台选择的文件适配层并在 Windows 启用；Bun 在 Windows 上经 `expect(...).rejects` 等待时不读取文件桥输出导致挂起，改为先取得拒绝结果再做同样断言；生命周期测试在 Windows 经标准输入触发同一 SIGINT 处理。Windows 全量 82 通过、2 项 macOS 剪贴板测试跳过。
 - [ ] 2.2 按第 1 组结论，把 `ink`、`react` 以精确版本加入运行时依赖，`@types/react`、`ink-testing-library` 加入开发依赖，更新 `bun.lock`；`tsconfig.json` 启用 `react-jsx` 并纳入 `src/**/*.tsx`、`tests/**/*.tsx`；`scripts/build.ts` 改用 `Bun.build` 编译，以插件把 `react-devtools-core` 解析为空实现，并关闭 `autoloadDotenv` 与 `autoloadBunfig`；开发机 Bun 版本与 `packageManager` 声明的 1.4.2 一致。验收：`bun run check` 通过，`bun run build` 四目标产物在无 Bun 的环境输出帮助和版本。
 
 ## 3. Runtime Session and Engine
