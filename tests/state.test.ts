@@ -150,6 +150,40 @@ test("写入实例运行时允许另一个只读状态连接", () => {
   } finally { reader.close(); }
 });
 
+test("界面只读视图：分享汇总、文件断点与副本状态、缺省值、账号隔离和只读连接", () => {
+  const f = fixture();
+  const second = f.store.mergeFile(f.scan, { sourceId: "second", gcid: "b".repeat(40), size: 5n, relativePath: "folder/second.bin" });
+  f.store.captureTitle(f.scan, "合集标题");
+  f.store.transition("account-a", f.file.id, "ready");
+  const operation = f.store.beginOperation("account-a", f.file.id, "restore");
+  f.store.transition("account-a", f.file.id, "saving");
+  f.store.submitted("account-a", operation, "synthetic-remote-task");
+  const copy = f.store.recordCopy("account-a", operation, { remoteId: "synthetic-copy", parentId: "parent", size: f.file.size, gcid: f.file.gcid });
+  f.store.transition("account-a", f.file.id, "awaiting_remote");
+  f.store.transition("account-a", f.file.id, "downloading");
+  f.store.allocateDelivery("account-a", f.file.id, "/fixed-output/tmp", "/fixed-output/final");
+  f.store.checkpoint("account-a", f.file.id, 9007199254740992n, "a".repeat(64));
+  f.store.copyState("account-a", copy, "protected");
+  f.store.fileError("account-a", second.id, "access_required"); f.store.cancel("account-a", second.id);
+  f.store.setConfig("queue_paused", "1"); f.store.setConfig("clipboard_watch", "0");
+  const reader = new Store(f.path, true);
+  try {
+    const shares = reader.shareViews("account-a");
+    expect(shares).toHaveLength(1);
+    expect(shares[0]).toMatchObject({ id: f.share.id, title: "合集标题", outputRoot: "/fixed-output",
+      scanStatus: f.store.share("account-a", f.share.id).scanStatus, cancelled: false, lastError: null });
+    expect(shares[0]!.summary).toMatchObject({ total: 2, active: 1, cancelled: 1 });
+    const files = reader.fileViews("account-a", f.share.id);
+    expect(files.map(file => file.id)).toEqual([f.file.id, second.id]);
+    expect(files[0]).toMatchObject({ shareId: f.share.id, relativePath: "folder/file.bin", size: 9007199254740993n, state: "downloading",
+      retries: 0n, cancelled: false, lastError: null, checkpoint: 9007199254740992n, copyState: "protected" });
+    expect(files[1]).toMatchObject({ size: 5n, state: "failed", cancelled: true, lastError: "access_required", checkpoint: 0n, copyState: null });
+    expect(reader.config("queue_paused")).toBe("1"); expect(reader.config("clipboard_watch")).toBe("0");
+    expect(reader.shareViews("account-b")).toEqual([]);
+    expect(() => reader.fileViews("account-b", f.share.id)).toThrow();
+  } finally { reader.close(); }
+});
+
 test("来源关联、保守副本归属和字节检查点持久化，路径分配保持稳定", () => {
   const f = fixture();
   f.store.transition("account-a", f.file.id, "ready");

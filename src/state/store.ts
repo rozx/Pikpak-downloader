@@ -24,6 +24,12 @@ export type CopyRecord = { id: string; remoteId: string; parentId: string; size:
 export type ReclaimCandidate = CopyRecord & { fileId: string; completedAt: bigint };
 export type Delivery = { fileId: string; tempPath: string; targetPath: string; checkpoint: bigint; prefixSha256: string | null;
   publishAttempt: bigint; volume: string | null; identity: string | null; sha256: string | null; verification: string | null; completedAt: bigint | null };
+export type ConfigKey = "active_account" | "output_root" | "queue_paused" | "clipboard_watch";
+export type ShareSummary = ReturnType<typeof aggregateCounts> & { reason: string | null };
+export type ShareView = { id: string; title: string | null; outputRoot: string; scanStatus: Share["scanStatus"]; cancelled: boolean;
+  lastError: string | null; summary: ShareSummary };
+export type FileView = Pick<FileRecord, "id" | "shareId" | "relativePath" | "size" | "state" | "retries" | "cancelled" | "lastError">
+  & { checkpoint: bigint; copyState: CopyRecord["state"] | null };
 type ShareRow = Omit<Share, "cancelled"> & { cancelled: bigint };
 type FileRow = Omit<FileRecord, "size" | "cancelled"> & { size: string; cancelled: bigint };
 const shareColumns = "id, account_id AS accountId, remote_id AS remoteId, output_root AS outputRoot, secret_ref AS secretRef, requested_revision AS requestedRevision, attempted_revision AS attemptedRevision, cancelled, scan_status AS scanStatus, last_error AS lastError";
@@ -84,10 +90,10 @@ export class Store {
     if (!accountId) throw new AppError("invalid_input");
     this.run("INSERT OR IGNORE INTO accounts(id,created_at) VALUES(?,?)", accountId, timestamp());
   }
-  setConfig(key: "active_account" | "output_root", value: string): void {
+  setConfig(key: ConfigKey, value: string): void {
     this.run("INSERT INTO config VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value);
   }
-  config(key: "active_account" | "output_root"): string | null { return this.get<{ value: string }>("SELECT value FROM config WHERE key=?", key)?.value ?? null; }
+  config(key: ConfigKey): string | null { return this.get<{ value: string }>("SELECT value FROM config WHERE key=?", key)?.value ?? null; }
   rateLimit(accountId: string, delayMs: number): void {
     const until = BigInt(Math.min(Number.MAX_SAFE_INTEGER, Date.now() + Math.max(0, delayMs)));
     this.run("INSERT INTO config VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", `rate_limit:${accountId}`, until.toString());
@@ -467,7 +473,7 @@ export class Store {
       }
     });
   }
-  summary(accountId: string, id: string) {
+  summary(accountId: string, id: string): ShareSummary {
     const share = this.share(accountId, id);
     const groups = this.all<{ state: FileState; cancelled: bigint; count: bigint }>("SELECT state,cancelled,count(*) AS count FROM files WHERE account_id=? AND share_id=? GROUP BY state,cancelled", accountId, id);
     const counts: Counts = { total: 0, completed: 0, cancelled: 0, failed: 0, waiting: 0, active: 0 };
@@ -481,6 +487,26 @@ export class Store {
       else counts.active += count;
     }
     return { ...aggregateCounts(counts, share.scanStatus, share.cancelled), reason: share.lastError };
+  }
+  // 界面只读视图：仅含 SELECT，只读连接也可调用。
+  shareViews(accountId: string): ShareView[] {
+    return this.all<ShareRow & { title: string | null }>(`SELECT ${shareColumns}, title FROM shares WHERE account_id=? ORDER BY created_at,id`, accountId)
+      .map(row => ({ id: row.id, title: row.title, outputRoot: row.outputRoot, scanStatus: row.scanStatus, cancelled: row.cancelled === 1n,
+        lastError: row.lastError, summary: this.summary(accountId, row.id) }));
+  }
+  fileViews(accountId: string, shareId: string): FileView[] {
+    this.share(accountId, shareId);
+    // 文件可能先后关联多份副本，显示最近一次转存产生的那份。
+    return this.all<FileRow & { checkpoint: string; copyState: CopyRecord["state"] | null }>(`SELECT ${fileColumns},
+      COALESCE((SELECT checkpoint FROM deliveries WHERE file_id=files.id),'0') AS checkpoint,
+      (SELECT c.state FROM copies c JOIN copy_references r ON r.copy_id=c.id JOIN operations o ON o.id=c.operation_id
+        WHERE r.file_id=files.id ORDER BY o.created_at DESC,c.id DESC LIMIT 1) AS copyState
+      FROM files WHERE account_id=? AND share_id=? ORDER BY rowid`, accountId, shareId)
+      .map(row => {
+        const file = fileValue(row);
+        return { id: file.id, shareId: file.shareId, relativePath: file.relativePath, size: file.size, state: file.state, retries: file.retries,
+          cancelled: file.cancelled, lastError: file.lastError, checkpoint: BigInt(row.checkpoint), copyState: row.copyState };
+      });
   }
   pause(accountId: string, reason: PauseReason, fileId: string | null = null): void {
     if (fileId) this.file(accountId, fileId);
