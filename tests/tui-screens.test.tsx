@@ -22,7 +22,7 @@ function mount(controller = new FakeController(), size: Size = { columns: 100, r
 test("主面板：标题栏、分组、进度、事件区与按键提示", async () => {
   const { frame } = mount(); await settle();
   const text = frame();
-  for (const part of ["PikPak Downloader", "● 已登录", "云盘 21 GB / 10 TB", "本地剩余 412 GB", "剪贴板 ● 监听中",
+  for (const part of ["PikPak Downloader", "● 已登录", "云盘 21.0 GB / 10 TB", "本地剩余 412.0 GB", "剪贴板 ● 监听中",
     "▼ 「某某合集」  1/3 完成 · 1 下载中 · 1 排队", "▼ 「纪录片合集」  0/2 完成 · 1 失败 · 1 等待", "▶ 「另一个分享」  2/2 完成",
     "48%  198 MB/412 MB  2.7 MB/s  1分19秒", "失败 · 下载地址多次刷新后仍被拒绝", "等待云端空间",
     "22:33:40  ✓ episode01.mkv 校验通过，已完成", "Enter 详情", "p 暂停"]) expect(text).toContain(part);
@@ -164,8 +164,8 @@ test("粘贴框：多行粘贴不提交并实时预览；只粘贴提取码提�
 test("标题栏左侧程序名与版本，右端与分隔线对齐，窄窗口依次省略本地剩余与云盘", async () => {
   // ink-testing-library 的虚拟终端固定 100 列，更宽的布局由实机复看覆盖。
   const cases: Array<[number, string[], string[]]> = [
-    [100, ["云盘 21 GB / 10 TB", "本地剩余 412 GB"], []],
-    [80, ["云盘 21 GB / 10 TB"], ["本地剩余"]],
+    [100, ["云盘 21.0 GB / 10 TB", "本地剩余 412.0 GB"], []],
+    [80, ["云盘 21.0 GB / 10 TB"], ["本地剩余"]],
     [60, [], ["云盘", "本地剩余"]],
   ];
   for (const [columns, shown, hidden] of cases) {

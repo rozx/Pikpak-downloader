@@ -1,12 +1,13 @@
 const units = ["B", "KB", "MB", "GB", "TB"] as const;
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-// 1024 进制；小于 10 保留一位小数，其余取整，最大单位为 TB。
-export function formatBytes(bytes: bigint): string {
+// 1024 进制；小于 10 保留一位小数，其余取整，最大单位为 TB。precise 时小于 1000 都保留一位小数，
+// 用于标题栏的已用与剩余空间：下载几百 MB 时取整的 GB 数看不出变化。
+export function formatBytes(bytes: bigint, precise = false): string {
   if (bytes < 1024n) return `${bytes} B`;
   let value = Number(bytes), unit = 0;
   while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+  return `${value < (precise ? 1000 : 10) ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 export const formatSpeed = (bytesPerSecond: number): string => `${formatBytes(BigInt(Math.max(0, Math.round(bytesPerSecond))))}/s`;
 export function formatDuration(seconds: number): string {

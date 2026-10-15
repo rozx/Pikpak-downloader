@@ -69,8 +69,8 @@ export function headerItems(snapshot: TuiSnapshot, available: number): Segment[]
     { segments: [{ text: "● ", tone: "done" }, { text: "已登录", tone: "text" }] },
     ...active.count ? [{ optional: 1, segments: [{ text: "下载中 ", tone: "muted" }, { text: `${active.count}/${snapshot.activeFiles.effective}`, tone: "active" }] } satisfies HeaderItem] : [],
     ...active.count && active.rate > 0 ? [{ optional: 2, segments: [{ text: "合计 ", tone: "muted" }, { text: formatSpeed(active.rate), tone: "active" }] } satisfies HeaderItem] : [],
-    ...snapshot.quota ? [{ optional: 3, segments: [{ text: "云盘 ", tone: "muted" }, { text: `${formatBytes(snapshot.quota.usage)} / ${formatBytes(snapshot.quota.limit)}`, tone: "text" }] } satisfies HeaderItem] : [],
-    ...snapshot.localFree !== null ? [{ optional: 4, segments: [{ text: "本地剩余 ", tone: "muted" }, { text: formatBytes(snapshot.localFree), tone: "text" }] } satisfies HeaderItem] : [],
+    ...snapshot.quota ? [{ optional: 3, segments: [{ text: "云盘 ", tone: "muted" }, { text: `${formatBytes(snapshot.quota.usage, true)} / ${formatBytes(snapshot.quota.limit)}`, tone: "text" }] } satisfies HeaderItem] : [],
+    ...snapshot.localFree !== null ? [{ optional: 4, segments: [{ text: "本地剩余 ", tone: "muted" }, { text: formatBytes(snapshot.localFree, true), tone: "text" }] } satisfies HeaderItem] : [],
     { segments: [{ text: "剪贴板 ", tone: "muted" }, clipboard] },
   ];
   const width = (list: HeaderItem[]) => list.reduce((sum, item) => sum + segmentsWidth(item.segments), 0) + ITEM_GAP * Math.max(0, list.length - 1);

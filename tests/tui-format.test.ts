@@ -5,8 +5,11 @@ import { createTheme } from "../src/tui/theme";
 import { LOGO, LOGO_WIDTH } from "../src/tui/brand";
 
 test("大小、速度与时长使用紧凑的中文格式", () => {
-  expect([0n, 512n, 1024n, 1536n, 412n * 1048576n, 2254857830n, 21n * 1024n ** 3n, 10n * 1024n ** 4n].map(formatBytes))
+  expect([0n, 512n, 1024n, 1536n, 412n * 1048576n, 2254857830n, 21n * 1024n ** 3n, 10n * 1024n ** 4n].map(value => formatBytes(value)))
     .toEqual(["0 B", "512 B", "1.0 KB", "1.5 KB", "412 MB", "2.1 GB", "21 GB", "10 TB"]);
+  // 标题栏的已用与剩余空间保留一位小数，下载几百 MB 也能看出变化。
+  expect([512n, 262n * 1024n ** 3n + 400n * 1048576n, 24n * 1024n ** 3n + 300n * 1048576n, 1023n * 1048576n, 10n * 1024n ** 4n].map(value => formatBytes(value, true)))
+    .toEqual(["512 B", "262.4 GB", "24.3 GB", "1023 MB", "10.0 TB"]);
   expect(formatBytes(9007199254740993n)).toBe("8192 TB");
   expect(formatSpeed(2.7 * 1048576)).toBe("2.7 MB/s");
   expect([0, 9.4, 59.6, 79, 3600, 7500].map(formatDuration)).toEqual(["0秒", "9秒", "1分00秒", "1分19秒", "1时00分", "2时05分"]);

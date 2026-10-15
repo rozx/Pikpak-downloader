@@ -57,7 +57,11 @@ export async function runTui(): Promise<number> {
       if (!root) throw new AppError("output_unavailable");
       const { session, drive, tier } = await prepareRuntime(state, account, root, filesystem, () => {});
       const controller = new LiveController({ store: state, accountId: account, session, quota: () => drive.quota(), tier: () => tier.current,
-        localFree: async () => { const directory = await filesystem.root(root); try { return await directory.freeBytes(); } finally { await directory.close(); } },
+        // 按当前的默认下载目录计算剩余空间；在设置页改到另一个磁盘后随之更新。
+        localFree: async () => {
+          const directory = await filesystem.root(state.config("output_root") ?? root);
+          try { return await directory.freeBytes(); } finally { await directory.close(); }
+        },
         // 有界停止：会话 10 秒内仍未结束则强制退出；任务库按可随时中断设计。
         stop: () => { runtime.abort(); setTimeout(() => finish(130), 10_000).unref(); },
         forceExit: () => finish(130) });

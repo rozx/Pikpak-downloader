@@ -124,3 +124,15 @@ test("快照中的同时下载文件数取配置值与账号等级上限中的�
   } finally { await f.close(); }
 });
 
+test("文件完成后立即刷新本地剩余空间，不等下一个周期", async () => {
+  const f = await fixture({ localMs: 60_000, flushMs: 0 });
+  try {
+    f.live.start(); await Bun.sleep(30);
+    const before = f.counts.local;
+    f.emit({ type: "completed", id: f.file.id }); await Bun.sleep(30);
+    expect(f.counts.local).toBe(before + 1);
+    f.emit({ type: "progress", id: f.file.id, bytes: 10n, size: 1000n }); await Bun.sleep(30);
+    expect(f.counts.local).toBe(before + 1);
+  } finally { await f.close(); }
+});
+

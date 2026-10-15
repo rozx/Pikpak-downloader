@@ -47,7 +47,7 @@ export class LiveController implements TuiController {
     this.unsubscribe = this.options.session.subscribe(event => this.handle(event));
     this.timers.push(setInterval(() => this.refresh(), this.options.snapshotMs ?? 500));
     this.timers.push(setInterval(() => void this.refreshQuota(), this.options.quotaMs ?? 60_000));
-    this.timers.push(setInterval(() => void this.refreshLocal(), this.options.localMs ?? 30_000));
+    this.timers.push(setInterval(() => void this.refreshLocal(), this.options.localMs ?? 10_000));
     void this.refreshQuota(); void this.refreshLocal();
   }
   dispose(): void {
@@ -92,6 +92,8 @@ export class LiveController implements TuiController {
       if (event.type === "clipboard_recovered" || (event.type === "started" && event.reason !== "clipboard_off")) this.clipboard = this.options.store.config("clipboard_watch") === "0" ? "off" : "on";
       if (event.type === "started" && event.reason === "clipboard_off") this.clipboard = "off";
       if (quotaEvents.has(event.type)) void this.refreshQuota();
+      // 文件完成发布后本地剩余空间随之变化，立即刷新，不等下一个周期。
+      if (event.type === "completed") void this.refreshLocal();
       const line = describeEvent(event, { share: id => this.shareTitle(id), file: id => this.fileTitle(id) });
       if (line) this.log(line);
     }
