@@ -219,7 +219,8 @@ test("正在执行的文件显示动态图标；暂停或系统暂停时恢复�
   const controller = new FakeController();
   const { frame } = mount(controller); await settle();
   const downloading = () => frame().split("\n").find(line => line.includes("episode02.mkv")) ?? "";
-  const icon = () => downloading().trim().replace(/^>\s*/, "").charAt(0);
+  // 行首依次是云端格（☁ 或空格）与选中标记，之后才是状态图标。
+  const icon = () => downloading().trim().replace(/^☁\s*/, "").replace(/^>\s*/, "").charAt(0);
   expect(SPINNER).toContain(icon());
   const first = icon(); await Bun.sleep(300);
   expect(SPINNER).toContain(icon()); expect(icon()).not.toBe(first);
@@ -290,7 +291,7 @@ test("同时下载数大于 1 时标题栏显示在途文件数与合计速度�
   const { frame } = mount(new FakeController(concurrentSnapshot()), { columns: 100, rows: 24 }); await settle();
   const rows = frame().split("\n").filter(line => line.includes("episode02.mkv") || line.includes("episode03.mkv"));
   expect(rows).toHaveLength(2);
-  for (const row of rows) { expect(row).toMatch(/MB\/s/); expect(SPINNER).toContain(row.trim().replace(/^>\s*/, "").charAt(0)); }
+  for (const row of rows) { expect(row).toMatch(/MB\/s/); expect(SPINNER).toContain(row.trim().replace(/^☁\s*/, "").replace(/^>\s*/, "").charAt(0)); }
   // 暂停时不显示。
   const paused = mount(new FakeController({ ...concurrentSnapshot(), userPaused: true }), { columns: 100, rows: 24 }); await settle();
   expect(paused.frame().split("\n")[0]).not.toContain("下载中");
@@ -364,21 +365,21 @@ test("x 在云盘中已没有副本的已完成任务上只删除记录；已完
   expect(frame()).toContain("已完成的删除任务记录"); expect(frame()).toContain("继续时从分享重新转存");
 });
 
-test("云端标记 ☁ 跟在状态后；本地文件已不在时写明；分享行有文件在云端时加 ☁；记录删除后行消失，详情页回到主面板", async () => {
+test("云端标记 ☁ 在分享行与文件行的最左一格，上下对齐；本地文件已不在时写明；记录删除后行消失，详情页回到主面板", async () => {
   const controller = new FakeController();
   const { frame, press } = mount(controller); await settle();
   const line = (name: string) => frame().split("\n").find(item => item.includes(name)) ?? "";
-  expect(line("episode01.mkv")).toMatch(/已完成$/);
-  expect(line("episode02.mkv")).toMatch(/1分19秒 ☁$/);
-  expect(line("第一季")).toMatch(/仍被拒绝 ☁$/);
+  expect(line("episode01.mkv")).toMatch(/^   > ✓  episode01\.mkv/); expect(line("episode01.mkv")).toMatch(/已完成$/);
+  expect(line("episode02.mkv")).toMatch(/^ ☁ {3}\S {2}episode02\.mkv/); expect(line("episode02.mkv")).toMatch(/1分19秒$/);
+  expect(line("第一季")).toMatch(/^ ☁   ✗/);
   expect(line("episode03.mkv")).not.toContain("☁");
-  expect(line("「某某合集」")).toMatch(/1 排队 ☁$/); expect(line("「另一个分享」")).not.toContain("☁");
+  expect(line("「某某合集」")).toMatch(/^ ☁ ▼ 「某某合集」/); expect(line("「另一个分享」")).toMatch(/^   ▶ 「另一个分享」/);
   const files = mockSnapshot().files;
   files.s_1 = files.s_1!.map(item => item.id === "f_1" ? { ...item, copyState: "retained" as const } : item);
   controller.update({ files }); await settle();
-  expect(line("episode01.mkv")).toMatch(/已完成 ☁$/);
+  expect(line("episode01.mkv")).toMatch(/^ ☁ > ✓  episode01\.mkv/);
   controller.update({ localMissing: new Set(["f_1"]) }); await settle();
-  expect(line("episode01.mkv")).toContain("已完成 · 本地文件已不在 ☁");
+  expect(line("episode01.mkv")).toContain("已完成 · 本地文件已不在");
   expect(line("「某某合集」")).toContain("· 1 本地缺失");
   await press(keys.enter);
   expect(frame()).toContain("本地文件"); expect(frame()).toContain("已不存在 · 被移动或删除");
@@ -394,9 +395,12 @@ test("按本地下载目录分组：目录只在分组行显示一次；分组�
   const controller = new FakeController(snapshot);
   const { frame, press } = mount(controller); await settle();
   const lines = frame().split("\n");
-  expect(lines.filter(item => item.includes("PikPak-Test"))).toEqual([" 下载到 C:\\Users\\demo\\Downloads\\PikPak-Test  · 2 个分享"]);
-  expect(lines.filter(item => item.includes("D:\\Other"))).toEqual([" 下载到 D:\\Other  · 1 个分享"]);
-  const order = lines.filter(item => !/\d\d:\d\d:\d\d/.test(item)).map(item => item.includes("下载到 C:") ? "G1" : item.includes("下载到 D:") ? "G2" : item.includes("「某某合集」") ? "S1"
+  // 分组行只有路径与一条延伸到行尾的虚线，与其他行同宽。
+  const groups = lines.filter(item => item.includes("┈"));
+  expect(groups.map(item => item.replace(/┈+$/, "┈"))).toEqual([" C:\\Users\\demo\\Downloads\\PikPak-Test ┈", " D:\\Other ┈"]);
+  for (const group of groups) expect(displayWidth(group)).toBe(99);
+  expect(lines.filter(item => item.includes("PikPak-Test"))).toHaveLength(1);
+  const order = lines.filter(item => !/\d\d:\d\d:\d\d/.test(item)).map(item => item.startsWith(" C:\\") ? "G1" : item.startsWith(" D:\\") ? "G2" : item.includes("「某某合集」") ? "S1"
     : item.includes("「另一个分享」") ? "S3" : item.includes("「纪录片合集」") ? "S2" : "").filter(Boolean);
   expect(order).toEqual(["G1", "S1", "S3", "G2", "S2"]);
   // 从第一个分享向上移动：分组行在顶部，停留在分享上；顶部的分组行保持可见。

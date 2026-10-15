@@ -123,7 +123,7 @@ export function shareCounts(files: FileView[], userPaused: boolean, sharePaused 
 }
 
 // 分组行（add-task-controls 决策 8）：按分享的本地下载目录分组，只显示、不可选中。
-export type GroupRow = { kind: "group"; key: string; path: string; shares: number };
+export type GroupRow = { kind: "group"; key: string; path: string };
 export type ListRow = Row | GroupRow;
 export const selectable = (row: ListRow | undefined): row is Row => !!row && row.kind !== "group";
 export type Row = { kind: "share"; key: string; share: ShareView; counts: ShareCounts; expanded: boolean }
@@ -137,7 +137,7 @@ export function buildRows(input: { shares: ShareView[]; files: Record<string, Fi
   const groups = new Map<string, ShareView[]>();
   for (const share of input.shares) groups.set(share.outputRoot, [...groups.get(share.outputRoot) ?? [], share]);
   for (const [path, shares] of groups) {
-    rows.push({ kind: "group", key: `g:${path}`, path, shares: shares.length });
+    rows.push({ kind: "group", key: `g:${path}`, path });
     for (const share of shares) {
       const files = input.files[share.id] ?? [];
       const expanded = input.expanded[share.id] ?? share.summary.status !== "completed";

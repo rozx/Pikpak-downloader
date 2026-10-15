@@ -2,7 +2,7 @@ import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 import type { Theme, Tone } from "./theme";
 import type { TuiSnapshot } from "./controller";
-import { formatBytes, formatDuration, formatSpeed, truncateMiddle } from "./format";
+import { displayWidth, formatBytes, formatDuration, formatSpeed, truncateMiddle } from "./format";
 import type { ListRow, Row, ShareCounts } from "./view-model";
 import { Banners, Bar, Header, Keys, Rule, SPINNER, bannerLines, boxHighlight, creditLabel, textHighlight, useSpinner } from "./parts";
 
@@ -14,10 +14,12 @@ export function panelLayout(size: Size, snapshot: TuiSnapshot, overlayLines = 0)
   const eventLines = Math.min(EVENT_LINES, snapshot.events.length || 1);
   return { listHeight: Math.max(1, size.rows - 1 - bannerLines(snapshot) - 3 - eventLines - 1 - overlayLines), eventLines };
 }
-// 名称之外：选中标记、图标、大小与状态（含云端标记）合计约 74 列。
-const nameWidthFor = (columns: number) => Math.max(18, Math.min(48, columns - 74));
-// 云端标记（add-task-controls 决策 6）：单宽文本符号（不带 emoji 变体选择符），淡蓝色，跟在状态后面。
+const nameWidthFor = (columns: number) => Math.max(18, Math.min(48, columns - 72));
+// 云端标记（add-task-controls 决策 6）：单宽文本符号（不带 emoji 变体选择符），淡蓝色，放在分享行与文件行的最左一格，上下对齐。
 export const CLOUD_MARK = "\u2601";
+function CloudSlot({ cloud, theme, selected }: { cloud: boolean; theme: Theme; selected: boolean }) {
+  return <Text {...theme.paint("cloud", selected)}>{cloud ? CLOUD_MARK : " "} </Text>;
+}
 
 // 选中行的全部文字都改用选中调色板，保证在选中背景上可读。
 function CountsText({ counts, theme, scanning, cancelled, paused, selected, frame }: { counts: ShareCounts; theme: Theme; scanning: boolean; cancelled: boolean; paused: boolean; selected: boolean; frame: number | null }) {
@@ -32,7 +34,6 @@ function CountsText({ counts, theme, scanning, cancelled, paused, selected, fram
       {part(counts.missing, "本地缺失", "warning")}
       {cancelled && <Text {...paint("muted")}> · 分享已取消</Text>}
       {paused && !cancelled && <Text {...paint("warning")}> · 已暂停</Text>}
-      {counts.cloud > 0 && <Text {...paint("cloud")}> {CLOUD_MARK}</Text>}
     </Text>
   );
 }
@@ -42,9 +43,8 @@ function FileStatus({ row, snapshot, theme, selected }: { row: Extract<Row, { ki
   const progress = snapshot.progress[row.file.id];
   const bytes = progress?.bytes ?? row.file.checkpoint, size = row.file.size;
   const percent = size > 0n ? Number(bytes * 100n / size) : 100;
-  const cloud = row.location.cloud ? <Text {...paint("cloud")}> {CLOUD_MARK}</Text> : null;
   if (row.look.label === "已暂停") {
-    return <Text><Bar percent={percent} theme={theme} tone="warning" selected={selected} /><Text {...paint("text")}>  {percent}%</Text><Text {...paint("warning")}>  已暂停</Text>{cloud}</Text>;
+    return <Text><Bar percent={percent} theme={theme} tone="warning" selected={selected} /><Text {...paint("text")}>  {percent}%</Text><Text {...paint("warning")}>  已暂停</Text></Text>;
   }
   if (row.file.state === "downloading" && !row.file.cancelled) {
     return (
@@ -52,21 +52,21 @@ function FileStatus({ row, snapshot, theme, selected }: { row: Extract<Row, { ki
         <Bar percent={percent} theme={theme} selected={selected} /><Text {...paint("strong")}>  {percent}%</Text>
         <Text {...paint("text")}>  {formatBytes(bytes)}/{formatBytes(size)}</Text>
         {progress?.rate != null && <Text {...paint("active")}>  {formatSpeed(progress.rate)}</Text>}
-        {progress?.eta != null && <Text {...paint("muted")}>  {formatDuration(progress.eta)}</Text>}{cloud}
+        {progress?.eta != null && <Text {...paint("muted")}>  {formatDuration(progress.eta)}</Text>}
       </Text>
     );
   }
-  return <Text wrap="truncate-end"><Text {...paint(row.look.tone)}>{row.look.label}</Text>{cloud}</Text>;
+  return <Text {...paint(row.look.tone)} wrap="truncate-end">{row.look.label}</Text>;
 }
 
 // frame 不为 null 时，正在执行的文件与扫描中的分享显示动态图标。
 export function RowLine({ row, selected, snapshot, theme, columns, frame = null }: { row: ListRow; selected: boolean; snapshot: TuiSnapshot; theme: Theme; columns: number; frame?: number | null }) {
   if (row.kind === "group") {
-    // 分组行：本地下载目录与其中的分享数；路径过长时从中间省略。
+    // 分组行：粗体的本地下载目录，后接一条灰色细虚线延伸到行尾；路径过长时从中间省略。
+    const path = truncateMiddle(row.path, Math.max(10, columns - 12));
     return (
       <Text wrap="truncate-end">
-        <Text {...theme.paint("muted")}>下载到 </Text><Text {...theme.paint("strong")} bold>{truncateMiddle(row.path, Math.max(10, columns - 24))}</Text>
-        <Text {...theme.paint("muted")}>  · {row.shares} 个分享</Text>
+        <Text {...theme.paint("strong")} bold>{path}</Text><Text {...theme.paint("muted")}> {"┈".repeat(Math.max(2, columns - 3 - displayWidth(path)))}</Text>
       </Text>
     );
   }
@@ -75,6 +75,7 @@ export function RowLine({ row, selected, snapshot, theme, columns, frame = null 
       <Box {...boxHighlight(theme.selection, selected)}>
         <Box flexShrink={1}>
           <Text wrap="truncate-end">
+            <CloudSlot cloud={row.counts.cloud > 0} theme={theme} selected={selected} />
             <Text {...theme.paint("muted", selected)}>{row.expanded ? "▼ " : "▶ "}</Text>
             <Text {...theme.paint("strong", selected)} bold {...textHighlight(theme.selection, selected)}>「{row.share.title ?? row.share.id}」</Text>
             <CountsText counts={row.counts} theme={theme} scanning={row.share.scanStatus !== "complete"} cancelled={row.share.cancelled} paused={row.share.paused} selected={selected} frame={frame} />
@@ -87,7 +88,8 @@ export function RowLine({ row, selected, snapshot, theme, columns, frame = null 
   const nameWidth = nameWidthFor(columns);
   return (
     <Box {...boxHighlight(theme.selection, selected)}>
-      <Text {...theme.paint("key", selected)} bold>{selected ? "  > " : "    "}</Text>
+      <CloudSlot cloud={row.location.cloud} theme={theme} selected={selected} />
+      <Text {...theme.paint("key", selected)} bold>{selected ? "> " : "  "}</Text>
       <Box width={3}><Text {...theme.paint(row.look.tone, selected)}>{row.look.active && frame !== null ? SPINNER[frame] : row.look.icon}</Text></Box>
       <Box width={nameWidth} marginRight={1}><Text {...theme.paint("text", selected)} bold={selected} {...textHighlight(theme.selection, selected)}>{truncateMiddle(row.name, nameWidth)}</Text></Box>
       <Box width={8} marginRight={1}><Text {...theme.paint("muted", selected)}>{formatBytes(row.file.size)}</Text></Box>
