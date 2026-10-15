@@ -11,7 +11,7 @@
 ## 2. State and Configuration
 
 - [x] 2.1 任务库结构升到 4：在现有迁移事务中给 `deliveries` 增加 `ranges_json`，沿用升级前备份。验收：迁移测试证明结构版本 3 的检查点仍作为连续前缀继续下载；旧程序拒绝写入版本 4；迁移失败时回滚。
-- [ ] 2.2 Store 的检查点读写：用一个事务同时写入 `checkpoint`、`prefix_sha256` 和 `ranges_json`，并校验决策 4 的不变式；读取时把格式错误或违反不变式的 `ranges_json` 视为空，但保留前缀；提供“已持久化字节数”辅助查询，并让 `fileViews()` 的断点字段改用它，TUI 主面板与详情页随之显示已持久化字节数。验收：单元测试覆盖区间越界、重叠、超过 16 项、大小不对齐、`chunk` 不一致、超出 JS 安全整数范围的偏移，以及 `mode = "sequential"` 时区间非空。
+- [x] 2.2 Store 的检查点读写：用一个事务同时写入 `checkpoint`、`prefix_sha256` 和 `ranges_json`，并校验决策 4 的不变式；读取时把格式错误或违反不变式的 `ranges_json` 视为空，但保留前缀；提供“已持久化字节数”辅助查询，并让 `fileViews()` 的断点字段改用它，TUI 主面板与详情页随之显示已持久化字节数。验收：单元测试覆盖区间越界、重叠、超过 16 项、大小不对齐、`chunk` 不一致、超出 JS 安全整数范围的偏移，以及 `mode = "sequential"` 时区间非空。
 - [ ] 2.3 配置键 `download_connections` 与 `config --connections <1-8>`，并在 `status` 中显示；全屏界面设置页增加“下载连接数”选项（←→ 调整，范围 1–8），经运行时会话命令 `setDownloadConnections` 保存。验收：拒绝 0、负数、非整数和大于 8 的值，保留原值；未设置时取默认值 4；`watch` 占锁期间写配置仍按单实例规则拒绝；帧测试覆盖设置页显示默认值、调整后保存、到达 1 和 8 时不再越界。
 
 ## 3. Segmented Download Core

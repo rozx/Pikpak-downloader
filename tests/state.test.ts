@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { Store } from "../src/state/store";
 import { SCHEMA_VERSION } from "../src/state/schema";
+import { CHUNK_SIZE, serializeRanges } from "../src/state/ranges";
 import { readdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { aggregate, assertTransition } from "../src/state/model";
@@ -246,5 +247,44 @@ test("升级失败时整体回滚，版本号与数据保持不变；更高版�
   expect(() => new Store(f.path)).toThrow("更新版本");
   const restored = new Database(f.path); restored.exec(`PRAGMA user_version=${SCHEMA_VERSION}`); restored.close();
   f.reopen();
+});
+
+test("检查点与区间同一次写入；无效区间被拒绝且保留原值；顺序模式在顺序路径保存后保留", () => {
+  const f = fixture(); downloading(f);
+  const S = CHUNK_SIZE, prefix = 9007199254740992n - 3n * S;
+  const ranges = { mode: "parallel" as const, chunk: S, ranges: [{ offset: prefix + S, bytes: S, sha256: "c".repeat(64) }, { offset: prefix + 3n * S, bytes: 1n, sha256: "d".repeat(64) }] };
+  f.store.checkpoint("account-a", f.file.id, prefix, "a".repeat(64), ranges);
+  expect(f.store.delivery("account-a", f.file.id)).toMatchObject({ checkpoint: prefix, prefixSha256: "a".repeat(64), ranges });
+  expect(f.store.persistedBytes("account-a", f.file.id)).toBe(prefix + S + 1n);
+  // 超出窗口的区间被拒绝，库中保持上一次的检查点。
+  expect(() => f.store.checkpoint("account-a", f.file.id, prefix, "b".repeat(64),
+    { mode: "parallel", chunk: S, ranges: [{ offset: prefix + 16n * S, bytes: 1n, sha256: "e".repeat(64) }] })).toThrow();
+  expect(f.store.delivery("account-a", f.file.id)).toMatchObject({ prefixSha256: "a".repeat(64), ranges });
+  // 顺序路径保存（省略区间）清空区间。
+  f.store.checkpoint("account-a", f.file.id, prefix + 10n, "b".repeat(64));
+  expect(f.store.delivery("account-a", f.file.id)?.ranges).toBe(null);
+  // 顺序模式由顺序路径保存保留，区间仍为空。
+  f.store.checkpoint("account-a", f.file.id, 0n, "c".repeat(64), { mode: "sequential", chunk: S, ranges: [] });
+  f.store.checkpoint("account-a", f.file.id, 5n, "d".repeat(64));
+  expect(f.reopen().delivery("account-a", f.file.id)?.ranges).toEqual({ mode: "sequential", chunk: S, ranges: [] });
+});
+
+test("库中区间损坏时整体视为空，前缀保留；界面断点显示已持久化字节数", () => {
+  const f = fixture(); downloading(f);
+  const S = CHUNK_SIZE;
+  f.store.checkpoint("account-a", f.file.id, 4n * S, "a".repeat(64), { mode: "parallel", chunk: S, ranges: [{ offset: 5n * S, bytes: 1000n, sha256: "c".repeat(64) }] });
+  expect(f.store.fileViews("account-a", f.share.id)[0]?.checkpoint).toBe(4n * S + 1000n);
+  f.store.close();
+  const db = new Database(f.path);
+  for (const corrupt of ["{broken", serializeRanges({ mode: "parallel", chunk: S, ranges: [{ offset: S, bytes: 1n, sha256: "c".repeat(64) }] })]) {
+    db.query("UPDATE deliveries SET ranges_json=? WHERE file_id=?").run(corrupt, f.file.id);
+    const reader = new Store(f.path, true);
+    try {
+      expect(reader.delivery("account-a", f.file.id)).toMatchObject({ checkpoint: 4n * S, prefixSha256: "a".repeat(64), ranges: null });
+      expect(reader.persistedBytes("account-a", f.file.id)).toBe(4n * S);
+      expect(reader.fileViews("account-a", f.share.id)[0]?.checkpoint).toBe(4n * S);
+    } finally { reader.close(); }
+  }
+  db.close(); f.reopen();
 });
 

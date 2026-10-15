@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { AppError } from "../errors";
 import { APPLICATION_ID, SCHEMA_VERSION, schema, migrationFrom1, migrationFrom2, migrationFrom3 } from "./schema";
 import { migrationBackup } from "./migration-backup";
+import { CHUNK_SIZE, parseRanges, persistedBytes, rangesValid, serializeRanges, type RangeCheckpoint } from "./ranges";
 import { aggregateCounts, assertTransition, canResume, type Counts, type FileState, type Pause, type PauseReason } from "./model";
 import type { FileIdentity } from "../platform/types";
 import type { CreationEvidence } from "../pikpak/ownership";
@@ -23,7 +24,8 @@ export type CopyRecord = { id: string; remoteId: string; parentId: string; size:
   state: "retained" | "deleting" | "deleted" | "protected"; operationId: string; evidence: CreationEvidence | null };
 export type ReclaimCandidate = CopyRecord & { fileId: string; completedAt: bigint };
 export type Delivery = { fileId: string; tempPath: string; targetPath: string; checkpoint: bigint; prefixSha256: string | null;
-  publishAttempt: bigint; volume: string | null; identity: string | null; sha256: string | null; verification: string | null; completedAt: bigint | null };
+  publishAttempt: bigint; volume: string | null; identity: string | null; sha256: string | null; verification: string | null; completedAt: bigint | null;
+  ranges: RangeCheckpoint | null };
 export type ConfigKey = "active_account" | "output_root" | "queue_paused" | "clipboard_watch";
 export type ShareSummary = ReturnType<typeof aggregateCounts> & { reason: string | null };
 export type ShareView = { id: string; title: string | null; outputRoot: string; scanStatus: Share["scanStatus"]; cancelled: boolean;
@@ -396,10 +398,14 @@ export class Store {
     return this.delivery(accountId, fileId)!;
   }
   delivery(accountId: string, fileId: string): Delivery | null {
-    const row = this.get<Omit<Delivery, "checkpoint"> & { checkpoint: string }>(`SELECT file_id AS fileId,temp_path AS tempPath,target_path AS targetPath,checkpoint,
-      prefix_sha256 AS prefixSha256,publish_attempt AS publishAttempt,file_volume AS volume,file_identity AS identity,
-      sha256,verification,completed_at AS completedAt FROM deliveries WHERE file_id=? AND account_id=?`, fileId, accountId);
-    return row ? { ...row, checkpoint: BigInt(row.checkpoint) } : null;
+    const row = this.get<Omit<Delivery, "checkpoint" | "ranges"> & { checkpoint: string; rangesJson: string | null; size: string }>(`SELECT file_id AS fileId,
+      temp_path AS tempPath,target_path AS targetPath,checkpoint,prefix_sha256 AS prefixSha256,publish_attempt AS publishAttempt,file_volume AS volume,
+      file_identity AS identity,sha256,verification,completed_at AS completedAt,ranges_json AS rangesJson,(SELECT size FROM files WHERE id=file_id) AS size
+      FROM deliveries WHERE file_id=? AND account_id=?`, fileId, accountId);
+    if (!row) return null;
+    const { rangesJson, size, ...delivery } = row, checkpoint = BigInt(row.checkpoint);
+    // 区间无效时整体视为空，前缀照常使用。
+    return { ...delivery, checkpoint, ranges: parseRanges(rangesJson, checkpoint, BigInt(size)) };
   }
   deliveryPlan(accountId: string, fileId: string): DeliveryPlan | null {
     this.file(accountId, fileId);
@@ -419,7 +425,8 @@ export class Store {
   replaceMissingTemporary(accountId: string, fileId: string, identity: FileIdentity): void {
     const file = this.file(accountId, fileId); const delivery = this.delivery(accountId, fileId);
     if (!delivery || delivery.sha256 !== null || ["publishing", "completed", "reconciling"].includes(file.state)) throw new AppError("needs_reconciliation");
-    this.run("UPDATE deliveries SET file_volume=?,file_identity=?,checkpoint='0',prefix_sha256=NULL WHERE file_id=?", identity.volume, identity.file, fileId);
+    this.run("UPDATE deliveries SET file_volume=?,file_identity=?,checkpoint='0',prefix_sha256=NULL,ranges_json=? WHERE file_id=?",
+      identity.volume, identity.file, this.keptMode(delivery.ranges), fileId);
   }
   planPublication(accountId: string, fileId: string, plan: DeliveryPlan, targetPath: string, sha256: string): void {
     this.transaction(() => {
@@ -447,11 +454,23 @@ export class Store {
     if (file.state === "completed" || !/^[a-z_]{1,64}$/.test(reason)) throw new AppError("invalid_transition");
     this.run("UPDATE files SET state=?,last_error=? WHERE id=?", attention ? "needs_attention" : "failed", reason, fileId);
   }
-  checkpoint(accountId: string, fileId: string, bytes: bigint, prefixSha256: string): void {
-    const file = this.file(accountId, fileId);
-    if (["completed", "publishing"].includes(file.state) || this.delivery(accountId, fileId)?.sha256 !== null
-      || bytes < 0n || bytes > file.size || !/^[a-f0-9]{64}$/.test(prefixSha256)) throw new AppError("invalid_input");
-    if (this.run("UPDATE deliveries SET checkpoint=?,prefix_sha256=? WHERE file_id=? AND account_id=? AND completed_at IS NULL", bytes.toString(), prefixSha256, fileId, accountId).changes !== 1) throw new AppError("invalid_transition");
+  // 前缀、前缀摘要与区间用同一条语句写入。省略 ranges 表示顺序路径的保存：清空区间，但保留已持久化的顺序模式。
+  checkpoint(accountId: string, fileId: string, bytes: bigint, prefixSha256: string, ranges?: RangeCheckpoint): void {
+    const file = this.file(accountId, fileId), delivery = this.delivery(accountId, fileId);
+    if (["completed", "publishing"].includes(file.state) || delivery?.sha256 !== null
+      || bytes < 0n || bytes > file.size || !/^[a-f0-9]{64}$/.test(prefixSha256)
+      || (ranges !== undefined && !rangesValid(ranges, bytes, file.size))) throw new AppError("invalid_input");
+    const json = ranges === undefined ? this.keptMode(delivery?.ranges ?? null) : serializeRanges(ranges);
+    if (this.run("UPDATE deliveries SET checkpoint=?,prefix_sha256=?,ranges_json=? WHERE file_id=? AND account_id=? AND completed_at IS NULL",
+      bytes.toString(), prefixSha256, json, fileId, accountId).changes !== 1) throw new AppError("invalid_transition");
+  }
+  private keptMode(ranges: RangeCheckpoint | null): string | null {
+    return ranges?.mode === "sequential" ? serializeRanges({ mode: "sequential", chunk: CHUNK_SIZE, ranges: [] }) : null;
+  }
+  // 已持久化的字节数：连续前缀加已保存区间，供界面显示断点进度。
+  persistedBytes(accountId: string, fileId: string): bigint {
+    const delivery = this.delivery(accountId, fileId);
+    return delivery ? persistedBytes(delivery.checkpoint, delivery.ranges) : 0n;
   }
   cancel(accountId: string, id: string): void {
     this.transaction(() => {
@@ -503,15 +522,16 @@ export class Store {
   fileViews(accountId: string, shareId: string): FileView[] {
     this.share(accountId, shareId);
     // 文件可能先后关联多份副本，显示最近一次转存产生的那份。
-    return this.all<FileRow & { checkpoint: string; copyState: CopyRecord["state"] | null }>(`SELECT ${fileColumns},
+    return this.all<FileRow & { checkpoint: string; rangesJson: string | null; copyState: CopyRecord["state"] | null }>(`SELECT ${fileColumns},
       COALESCE((SELECT checkpoint FROM deliveries WHERE file_id=files.id),'0') AS checkpoint,
+      (SELECT ranges_json FROM deliveries WHERE file_id=files.id) AS rangesJson,
       (SELECT c.state FROM copies c JOIN copy_references r ON r.copy_id=c.id JOIN operations o ON o.id=c.operation_id
         WHERE r.file_id=files.id ORDER BY o.created_at DESC,c.id DESC LIMIT 1) AS copyState
       FROM files WHERE account_id=? AND share_id=? ORDER BY rowid`, accountId, shareId)
       .map(row => {
-        const file = fileValue(row);
+        const file = fileValue(row), prefix = BigInt(row.checkpoint);
         return { id: file.id, shareId: file.shareId, relativePath: file.relativePath, size: file.size, state: file.state, retries: file.retries,
-          cancelled: file.cancelled, lastError: file.lastError, checkpoint: BigInt(row.checkpoint), copyState: row.copyState };
+          cancelled: file.cancelled, lastError: file.lastError, checkpoint: persistedBytes(prefix, parseRanges(row.rangesJson, prefix, file.size)), copyState: row.copyState };
       });
   }
   pause(accountId: string, reason: PauseReason, fileId: string | null = null): void {
