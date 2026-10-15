@@ -4,7 +4,9 @@ import { DownloadError } from "../src/download/download-error";
 import { SequentialFallback, reconcileSegments } from "../src/download/segmented";
 import { MemoryFile } from "./fixtures/memory-file";
 import { rejection } from "./fixtures/rejection";
-import { S, bytes, cdn, leaseFor, runSegmented, setup } from "./fixtures/segments";
+import { S, bytes, cdn, fastClock, leaseFor, runSegmented, setup } from "./fixtures/segments";
+import { UrlLease } from "../src/download/lease";
+import type { RemoteFile } from "../src/pikpak/drive";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -123,3 +125,46 @@ test("已有进度时出现 Range 异常：清空区间、截断到 0 并持久�
   expect(local.data.length).toBe(0);
   expect(f.store.delivery("account", f.file.id)).toMatchObject({ checkpoint: 0n, ranges: { mode: "sequential", chunk: CHUNK_SIZE, ranges: [] } });
 });
+
+test("刷新地址时发现版本变化：停止全部连接并上报 version_changed，已保存的检查点可以核对", async () => {
+  const content = bytes(4 * S, 12), f = await setup(content, cleanups), local = new MemoryFile();
+  let calls = 0;
+  const check = async (): Promise<RemoteFile> => {
+    if (++calls > 1) throw new DownloadError("version_changed");
+    return { id: "copy", parentId: "p", name: "f.bin", size: f.file.size, gcid: f.file.gcid, raw: { links: { "application/octet-stream": { url: "https://cdn.mypikpak.net/v1" } } } };
+  };
+  // 第 2 块的请求收到 403，刷新时发现版本已变。
+  const server = cdn(content, request => request.start === 2 * S ? new Response(null, { status: 403 }) : undefined);
+  const error = await rejection(runSegmented(f, local, server.http, { lease: new UrlLease(check, fastClock) }).result);
+  expect(code(error)).toBe("version_changed");
+  const stored = f.store.delivery("account", f.file.id)!;
+  const { plan } = await reconcileSegments(f.store, "account", f.file, local, 8);
+  expect(plan.prefix).toBe(stored.checkpoint); expect(plan.ranges()).toHaveLength(stored.ranges?.ranges.length ?? 0);
+});
+
+test("单个连接中途断开：该分块从已接收位置继续，其他分块不受影响", async () => {
+  const content = bytes(3 * S + 5, 13), f = await setup(content, cleanups);
+  let cut = false;
+  const server = cdn(content, request => {
+    if (request.start === S && !cut) { cut = true; return { body: content.slice(S, S + 300_000) }; }
+    return undefined;
+  });
+  expect(await runSegmented(f, new MemoryFile(), server.http).result).toEqual(f.digest);
+  const chunk = server.requests.filter(request => request.start >= S && request.start < 2 * S).map(request => request.start);
+  expect(chunk[0]).toBe(S); expect(chunk[1]).toBe(S + 300_000);
+  expect(server.requests.filter(request => request.start === 0)).toHaveLength(1);
+});
+
+test("连接停滞超过时限后换连接继续，最终完成", async () => {
+  const content = bytes(2 * S + 7, 14), f = await setup(content, cleanups);
+  let stalled = false;
+  const server = cdn(content, request => {
+    if (request.start === S && !stalled) { stalled = true; return { delayMs: 5_000 }; }
+    return undefined;
+  });
+  const started = Date.now();
+  expect(await runSegmented(f, new MemoryFile(), server.http, { stallTimeoutMs: 100 }).result).toEqual(f.digest);
+  expect(stalled).toBe(true); expect(Date.now() - started).toBeLessThan(4_000);
+  expect(server.requests.filter(request => request.start === S)).toHaveLength(2);
+});
+
