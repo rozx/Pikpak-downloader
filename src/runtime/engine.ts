@@ -19,11 +19,19 @@ export class Engine {
   private blocked = false;
   private lastProgress = 0;
   private preferFile = false;
+  private readonly listeners = new Set<(event: RuntimeEvent) => void>();
   constructor(private readonly store: Store, private readonly secrets: SecretStore, private readonly drive: Drive,
-    private readonly filesystem: LocalFileSystem, private readonly event: (event: RuntimeEvent) => void = () => {},
+    private readonly filesystem: LocalFileSystem, private readonly report: (event: RuntimeEvent) => void = () => {},
     private readonly http?: DownloadTransport,
     wait?: (ms: number, signal?: AbortSignal) => Promise<void>) {
     this.restore = new Restore(store, secrets, drive, wait); this.space = new SpaceManager(store, drive, wait);
+  }
+  subscribe(listener: (event: RuntimeEvent) => void): () => void {
+    this.listeners.add(listener); return () => { this.listeners.delete(listener); };
+  }
+  private event(event: RuntimeEvent): void {
+    this.report(event);
+    for (const listener of this.listeners) listener(event);
   }
   private pause(reason: "authentication" | "permission" | "local_space" | "target_unavailable" | "database" | "traffic_quota", fileId?: string): void {
     if (reason === "database") this.blocked = true;

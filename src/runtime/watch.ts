@@ -10,8 +10,9 @@ import { Drive } from "../pikpak/drive";
 import { systemFiles } from "../platform/file-system";
 import { systemClipboard } from "../platform/clipboard";
 import { IntakeReceiver } from "../intake/receiver";
-import { pollClipboard, type Clipboard } from "../intake/clipboard";
+import type { Clipboard } from "../intake/clipboard";
 import { Engine, type RuntimeEvent } from "./engine";
+import { RuntimeSession, type SessionEngine } from "./session";
 import type { LocalFileSystem } from "../platform/files";
 
 const labels: Record<string, string> = { scanning: "正在扫描", scanned: "扫描完成", scan_incomplete: "扫描未完整完成", scan_waiting: "扫描等待处理",
@@ -65,39 +66,25 @@ async function startWatch(store: Store, accountId: string, root: string, signal:
   await foregroundLoop(store, accountId, clipboard, receiver, engine, signal);
 }
 
-export async function foregroundLoop(store: Store, accountId: string, clipboard: Clipboard, receiver: IntakeReceiver, engine: Engine,
-  signal: AbortSignal, notify: (message: string) => void = console.log): Promise<void> {
-  const stop = new AbortController();
-  const combined = AbortSignal.any([signal, stop.signal]);
-  let wake: (() => void) | undefined;
-  const intake = pollClipboard(clipboard, combined, async snapshot => {
-    const result = await receiver.receive(snapshot);
-    for (const id of result.ids) {
-      const share = store.share(accountId, id);
-      notify(share.cancelled ? `任务 ${id} 已取消；retry 才会恢复。` : `已接收 ${id}`);
-    }
-    if (result.issues.length) notify("部分分享文本格式不支持或配对不明确，请分别复制完整文本。");
-    if (result.failure) { engine.blockPersistence(); notify("部分输入未确认接收：资料或任务保存失败，请解决后重新复制。"); }
-    wake?.();
-  }, failed => notify(failed ? "剪贴板暂时不可读，正在退避重试；已有任务保留。" : "剪贴板监听已恢复。"));
-  // 监听异常由主流程接收，避免未处理拒绝输出底层数据。
-  const intakeResult = intake.catch(() => { engine.blockPersistence(); stop.abort(); });
-  notify("监听已启动。复制完整分享文本即可接收任务；Ctrl+C 停止。确认接收前请勿快速覆盖剪贴板。");
-  try {
-    await engine.resumeLocalPause(combined);
-    await engine.resumeTrafficPause(combined);
-    if (!store.paused(accountId)) await engine.reconcile(combined);
-    while (!combined.aborted) {
-      try { if (await engine.step(combined)) continue; }
-      catch { engine.blockPersistence(); }
-      await new Promise<void>(resolve => {
-        const done = () => { clearTimeout(timer); combined.removeEventListener("abort", done); wake = undefined; resolve(); };
-        const timer = setTimeout(done, 500); wake = done; combined.addEventListener("abort", done, { once: true });
-        if (combined.aborted) done();
-      });
-    }
-  } finally {
-    stop.abort(); wake?.(); await intakeResult;
-    notify("监听已停止，未完成任务和可恢复进度已保留。使用 status 查看，retry 重试，cancel 停止调度。");
+// 会话自身的事件转成纯文本提示；执行器事件由创建执行器时传入的 printEvent 输出。
+export function sessionMessage(event: RuntimeEvent): string | null {
+  switch (event.type) {
+    case "started": return event.reason === "clipboard_off" ? "执行已启动；剪贴板监听已在设置中关闭。Ctrl+C 停止。"
+      : "监听已启动。复制完整分享文本即可接收任务；Ctrl+C 停止。确认接收前请勿快速覆盖剪贴板。";
+    case "received": return `已接收 ${event.id}`;
+    case "received_cancelled": return `任务 ${event.id} 已取消；retry 才会恢复。`;
+    case "intake_issues": return "部分分享文本格式不支持或配对不明确，请分别复制完整文本。";
+    case "intake_failed": return "部分输入未确认接收：资料或任务保存失败，请解决后重新复制。";
+    case "clipboard_unavailable": return "剪贴板暂时不可读，正在退避重试；已有任务保留。";
+    case "clipboard_recovered": return "剪贴板监听已恢复。";
+    case "stopped": return "监听已停止，未完成任务和可恢复进度已保留。使用 status 查看，retry 重试，cancel 停止调度。";
+    default: return null;
   }
+}
+
+export async function foregroundLoop(store: Store, accountId: string, clipboard: Clipboard, receiver: IntakeReceiver, engine: SessionEngine,
+  signal: AbortSignal, notify: (message: string) => void = console.log): Promise<void> {
+  const session = new RuntimeSession(store, accountId, engine, receiver, clipboard);
+  session.subscribe(event => { const message = sessionMessage(event); if (message) notify(message); });
+  await session.run(signal);
 }
