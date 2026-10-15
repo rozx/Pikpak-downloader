@@ -13,7 +13,7 @@ import type { CreationEvidence } from "../src/pikpak/ownership";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "pikpak-space-test-")); const path = join(root, "db.sqlite"), store = new Store(path);
   store.ensureAccount("account"); const share = store.accept("account", "share", root, "reference"); const scan = store.claimScan("account", share.id)!;
-  const state = { limit: 100n, usage: 90n, delayed: false, lost: false, denied: false, quietDenied: false, quiet: [] as boolean[], deletions: [] as string[], files: new Map<string, Record<string, unknown>>() };
+  const state = { limit: 100n, usage: 90n, delayed: false, lost: false, denied: false, quietDenied: false, quiet: [] as boolean[], deletions: [] as string[], requests: [] as number[], lingering: new Set<string>(), files: new Map<string, Record<string, unknown>>() };
   const add = (remoteId: string, completed: boolean, owned: boolean, size = 40n, completedAt = 1) => {
     const file = store.mergeFile(scan, { sourceId: `source-${remoteId}`, size, gcid: "a".repeat(40), relativePath: "synthetic" });
     const operation = store.beginOperation("account", file.id, "restore"); store.submitted("account", operation, `task-${remoteId}`);
@@ -40,10 +40,12 @@ async function fixture() {
       // 静默请求的拒绝只抛给调用者，不暂停账号（与 PikpakClient 的 quiet 选项一致）。
       if (state.quietDenied && options.quiet) throw new ProviderError("delete", "permission_denied", 403);
       if (state.denied) { store.pause("account", "permission"); throw new ProviderError("delete", "permission_denied", 403); }
-      expect(ids).toHaveLength(1); const id = ids[0] as string;
-      const file = state.files.get(id); if (!file) throw Error("cannot-delete-unregistered-resource");
-      state.deletions.push(id); state.files.delete(id);
-      if (!state.delayed) state.usage -= BigInt(String(file.size));
+      state.requests.push(ids.length);
+      for (const id of ids as string[]) {
+        const file = state.files.get(id); if (!file) throw Error("cannot-delete-unregistered-resource");
+        state.deletions.push(id); if (!state.lingering.has(id)) state.files.delete(id);
+        if (!state.delayed) state.usage -= BigInt(String(file.size));
+      }
       if (state.lost) throw Error("synthetic-response-lost");
       return {};
     }
@@ -53,7 +55,7 @@ async function fixture() {
   } };
   let now = 0;
   const manager = new SpaceManager(store, new Drive(api, "account"), async ms => { now += ms; }, () => now);
-  return { root, path, store, share, scan, state, add, manager, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
+  return { root, path, store, share, scan, state, add, manager, elapsed: () => now, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
 test("本地成果已移除仍按历史完成时间回收，满足需要立即停止", async () => {
@@ -207,5 +209,35 @@ test("删除任务记录：只删已完成且云端副本都已删除、没有�
     f.store.finishScan(f.scan, true);
     expect(f.store.forgetShare("account", f.share.id)).toBe("reference");
     expect(f.store.shareViews("account")).toEqual([]); expect(f.store.secretReferenced("reference")).toBe(false);
+  } finally { await f.close(); }
+});
+
+test("批量释放：一次删除请求带多个 ID；以副本不可见为准确认，不等待容量反映", async () => {
+  const f = await fixture();
+  try {
+    const copies = ["one", "two", "three"].map(id => f.add(id, true, true));
+    f.state.delayed = true; // 容量迟迟不反映释放（或同时有转存让容量上升）
+    const outcomes = await f.manager.releaseMany(copies.map(item => ({ copyId: item.copyId, fileId: item.file.id })));
+    expect([...outcomes.values()]).toEqual([{ outcome: "released" }, { outcome: "released" }, { outcome: "released" }]);
+    expect(f.state.requests).toEqual([3]); expect(f.state.quiet).toEqual([true]); expect(f.elapsed()).toBe(0);
+    for (const item of copies) expect(f.store.copy("account", item.copyId).state).toBe("deleted");
+    expect(f.store.unresolved("account")).toEqual([]);
+  } finally { await f.close(); }
+});
+
+test("批量释放：删除后仍可见的副本 30 秒后标为待核对，其余照常确认；整批被拒绝时全部保留", async () => {
+  const f = await fixture();
+  try {
+    const [gone, stuck] = ["gone", "stuck"].map(id => f.add(id, true, true));
+    f.state.lingering.add("stuck");
+    const outcomes = await f.manager.releaseMany([gone!, stuck!].map(item => ({ copyId: item.copyId, fileId: item.file.id })));
+    expect(outcomes.get(gone!.copyId)).toEqual({ outcome: "released" }); expect(outcomes.get(stuck!.copyId)).toEqual({ outcome: "unconfirmed" });
+    expect(f.elapsed()).toBeGreaterThanOrEqual(30000); expect(f.elapsed()).toBeLessThan(40000);
+    expect(f.store.unresolved("account").map(item => item.status)).toEqual(["attention"]);
+    const denied = ["a", "b"].map(id => f.add(id, true, true)); f.state.quietDenied = true;
+    const refused = await f.manager.releaseMany(denied.map(item => ({ copyId: item.copyId, fileId: item.file.id })));
+    expect([...refused.values()]).toEqual([{ outcome: "denied", reason: "permission_denied" }, { outcome: "denied", reason: "permission_denied" }]);
+    for (const item of denied) expect(f.store.copy("account", item.copyId).state).toBe("retained");
+    expect(f.store.paused("account")).toBe(null);
   } finally { await f.close(); }
 });

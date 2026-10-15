@@ -172,6 +172,7 @@ test.if(nativeFiles)("全部释放：释放全部已完成任务的副本并删�
     await engine.settleReleases();
     expect(engine.releasingFiles()).toEqual([]);
     expect(f.state.deleted.sort()).toEqual(["copy-1", "copy-2"]); expect(events.filter(event => event.type === "copy_released")).toHaveLength(2);
+    expect(f.state.deleteRequests).toEqual([2]); // 合并为一次删除请求
     expect(f.store.shareViews("account")).toEqual([]);
     for (const [index, target] of targets.entries()) expect(await readFile(target)).toEqual(f.sources[index]!.bytes);
   } finally { await f.close(); }

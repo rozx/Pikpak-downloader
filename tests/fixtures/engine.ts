@@ -21,7 +21,7 @@ export async function engineFixture(files: LocalFileSystem, count = 2, sizes?: n
     const bytes = Buffer.alloc(sizes?.[index] ?? 40, index); const hash = new ContentHasher(BigInt(bytes.length)); hash.update(bytes);
     return { id: `source-${index}`, name: "file.bin", kind: "drive#file", phase: "PHASE_TYPE_COMPLETE", size: String(bytes.length), hash: hash.digest().gcid, bytes };
   });
-  const state = { saves: 0, usage: 10n, limit: 60n, expired: false, deleted: [] as string[], cloud: new Map<string, Record<string, unknown>>(), tasks: new Map<string, Record<string, unknown>>(), sourceReads: 0 };
+  const state = { saves: 0, usage: 10n, limit: 60n, expired: false, deleted: [] as string[], deleteRequests: [] as number[], cloud: new Map<string, Record<string, unknown>>(), tasks: new Map<string, Record<string, unknown>>(), sourceReads: 0 };
   const json = (value: unknown) => Response.json(value, { headers: { date: "Thu, 08 Oct 2026 10:00:00 GMT" } });
   const http: Transport = async (input, init) => {
     const url = new URL(input), path = url.pathname;
@@ -44,8 +44,9 @@ export async function engineFixture(files: LocalFileSystem, count = 2, sizes?: n
       return json({ restore_status: "RESTORE_START", restore_task_id: task });
     }
     if (path.endsWith("/files:batchDelete")) {
-      const ids = JSON.parse(String(init.body)).ids; expect(ids).toHaveLength(1);
-      expect(state.cloud.has(ids[0])).toBe(true); state.usage -= BigInt(String(state.cloud.get(ids[0])!.size)); state.cloud.delete(ids[0]); state.deleted.push(ids[0]); return json({});
+      const ids = JSON.parse(String(init.body)).ids as string[]; state.deleteRequests.push(ids.length);
+      for (const id of ids) { expect(state.cloud.has(id)).toBe(true); state.usage -= BigInt(String(state.cloud.get(id)!.size)); state.cloud.delete(id); state.deleted.push(id); }
+      return json({});
     }
     const id = path.split("/").at(-1)!;
     if (path.includes("/tasks/") && state.tasks.has(id)) return json(state.tasks.get(id));
