@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { BunPlugin } from "bun";
 import pkg from "../package.json";
-import { iconIco } from "./icon";
+import { iconIco, repointIconGroups } from "./icon";
 
 const root = resolve(import.meta.dir, "..");
 const targets = ["bun-darwin-arm64", "bun-darwin-x64", "bun-windows-x64", "bun-windows-arm64", "bun-linux-x64", "bun-linux-arm64"] as const;
@@ -47,5 +47,10 @@ for (const target of selected) {
   });
   for (const log of build.logs) console.error(String(log));
   if (!build.success) process.exit(1);
+  if (target.includes("windows")) {
+    const exe = new Uint8Array(await Bun.file(outfile).arrayBuffer());
+    repointIconGroups(exe);
+    await Bun.write(outfile, exe);
+  }
   console.log(`已生成 ${outfile}`);
 }
