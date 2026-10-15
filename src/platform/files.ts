@@ -1,4 +1,7 @@
 import type { FileIdentity } from "./types";
+// 单次读取的最大字节数。Windows 文件桥每次调用都要往返一条 JSON 行（base64 后约 700 KB，低于 1 MiB 上限），
+// 读得越大调用越少；64 KiB 时整文件读回只有约 13 MiB/s。
+export const READ_BLOCK = 524288;
 export interface LocalFile {
   info(): Promise<{ identity: FileIdentity; size: bigint }>;
   read(position: bigint, length: number): Promise<Uint8Array>;

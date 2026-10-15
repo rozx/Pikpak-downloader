@@ -1,5 +1,5 @@
 import type { Store, FileRecord, CopyRecord } from "../state/store";
-import type { LocalFile } from "../platform/files";
+import { READ_BLOCK, type LocalFile } from "../platform/files";
 import type { RemoteFile } from "../pikpak/drive";
 import { ContentHasher } from "./gcid";
 import { originalLink, secureDownloadUrl } from "./original-link";
@@ -17,7 +17,7 @@ async function prefix(file: LocalFile, size: bigint, bytes: bigint, signal?: Abo
   const hash = new ContentHasher(size); let offset = 0n;
   while (offset < bytes) {
     if (signal?.aborted) throw signal.reason ?? Error("interrupted");
-    const chunk = await file.read(offset, Number(bytes - offset < 65536n ? bytes - offset : 65536n));
+    const chunk = await file.read(offset, Number(bytes - offset < BigInt(READ_BLOCK) ? bytes - offset : BigInt(READ_BLOCK)));
     if (!chunk.byteLength) throw new DownloadError("truncated_content");
     hash.update(chunk); offset += BigInt(chunk.byteLength);
   }
@@ -131,7 +131,7 @@ export async function download(store: Store, accountId: string, file: FileRecord
   try {
     const connections = options.connections ?? 1;
     const parallel = connections > 1 && file.size > CHUNK_SIZE && store.delivery(accountId, file.id)!.ranges?.mode !== "sequential";
-    let digest: { gcid: string; sha256: string };
+    let digest: { gcid: string; sha256: string }, fromDisk = false;
     if (parallel) {
       try {
         digest = await downloadSegmented({ store, accountId, file, local, connections, http, signal, progress, lease: new UrlLease(check, options.now),
@@ -139,7 +139,7 @@ export async function download(store: Store, accountId: string, file: FileRecord
           ...(options.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: options.stallTimeoutMs }),
           ...(options.startConnections === undefined ? {} : { startConnections: options.startConnections }),
           ...(options.onConcurrency ? { onConcurrency: options.onConcurrency } : {}) });
-        await check();
+        await check(); fromDisk = true;
       } catch (error) {
         if (!(error instanceof SequentialFallback)) throw error;
         digest = await sequentialDownload(1);
@@ -147,10 +147,16 @@ export async function download(store: Store, accountId: string, file: FileRecord
     } else digest = await sequentialDownload();
     if (digest.gcid !== file.gcid) throw new DownloadError("integrity_mismatch");
     store.transition(accountId, file.id, "verifying");
-    const readBack = await hashFile(local, file.size, signal);
-    if (readBack.gcid !== file.gcid || readBack.sha256 !== digest.sha256) throw new DownloadError("integrity_mismatch");
+    // 顺序路径的摘要来自网络字节流，需要整文件读回一次。分段路径的摘要本身就由逐块读回的磁盘数据算出
+    // （并入前缀时读回并核对每个分块），这里只确认文件大小未变，不再读第二遍。
+    if (fromDisk) {
+      if ((await local.info()).size !== file.size) throw new DownloadError("integrity_mismatch");
+    } else {
+      const readBack = await hashFile(local, file.size, signal);
+      if (readBack.gcid !== file.gcid || readBack.sha256 !== digest.sha256) throw new DownloadError("integrity_mismatch");
+    }
     await local.sync(); await local.close(); closed = true;
-    await publishVerified(store, accountId, file, workspace, digest, signal);
+    await publishVerified(store, accountId, file, workspace, digest, signal, undefined, { verified: true });
   } catch (error) {
     if (!closed && error instanceof DownloadError && error.code === "integrity_mismatch") {
       // 从头开始并清空区间；顺序模式标记保留（这不是 Range 异常）。

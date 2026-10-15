@@ -1,7 +1,7 @@
 /// <reference path="./assets.d.ts" />
 import script from "./windows-files.ps1" with { type: "text" };
 import { ProcessBridge } from "./process-bridge";
-import type { LocalDirectory, LocalFile, LocalFileSystem } from "./files";
+import { READ_BLOCK, type LocalDirectory, type LocalFile, type LocalFileSystem } from "./files";
 import type { FileIdentity } from "./types";
 
 function handle(value: unknown): string { if (typeof value !== "string" || !/^[a-f0-9-]{36}$/i.test(value)) throw Error("invalid-native-handle"); return value; }
@@ -15,7 +15,7 @@ class WindowsFile implements LocalFile {
   constructor(private readonly bridge: ProcessBridge, private readonly id: string) {}
   async info() { return info(await this.bridge.call({ action: "info", id: this.id })); }
   async read(position: bigint, length: number) {
-    const encoded = await this.bridge.call({ action: "read", id: this.id, offset: position.toString(), length: Math.min(length, 65536) });
+    const encoded = await this.bridge.call({ action: "read", id: this.id, offset: position.toString(), length: Math.min(length, READ_BLOCK) });
     if (typeof encoded !== "string") throw Error("invalid-native-read"); return Buffer.from(encoded, "base64");
   }
   async write(position: bigint, data: Uint8Array) {

@@ -1,6 +1,6 @@
 import { createHash, type Hash } from "node:crypto";
 import type { FileRecord, Store } from "../state/store";
-import type { LocalFile } from "../platform/files";
+import { READ_BLOCK, type LocalFile } from "../platform/files";
 import { CHUNK_SIZE, MAX_RANGES, type ByteRange } from "../state/ranges";
 import { ContentHasher } from "./gcid";
 import { ChunkPlan, ConnectionGate, chunkLength, type Chunk } from "./chunks";
@@ -8,7 +8,7 @@ import { receiveRange, type DownloadTransport } from "./range-worker";
 import { DownloadError } from "./download-error";
 import type { UrlLease } from "./lease";
 
-const SAVE_EVERY = 4n * 1048576n, READ_BLOCK = 65536n;
+const SAVE_EVERY = 4n * 1048576n, READ = BigInt(READ_BLOCK);
 // 失败预算（决策 8）：同一分块连续失败 3 次，或全文件连续 6 次请求失败且期间没有分块完成。
 const CHUNK_FAILURES = 3, FILE_FAILURES = 6, RETRY_PAUSE_MS = 500;
 // 限流自适应（决策 7）：冷却时间取 Retry-After 并限制在 1–60 秒，缺省 5 秒；连续完成 16 个分块后恢复 1 个连接。
@@ -21,7 +21,7 @@ export class SequentialFallback extends Error { constructor() { super("sequentia
 async function readInto(local: LocalFile, start: bigint, end: bigint, sink: (bytes: Uint8Array) => void, signal?: AbortSignal): Promise<void> {
   for (let offset = start; offset < end;) {
     if (signal?.aborted) throw signal.reason ?? Error("interrupted");
-    const bytes = await local.read(offset, Number(end - offset < READ_BLOCK ? end - offset : READ_BLOCK));
+    const bytes = await local.read(offset, Number(end - offset < READ ? end - offset : READ));
     if (!bytes.byteLength) throw new DownloadError("truncated_content");
     sink(bytes); offset += BigInt(bytes.byteLength);
   }

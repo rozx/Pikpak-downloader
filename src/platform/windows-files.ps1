@@ -96,7 +96,7 @@ public static class PikpakLocalFiles {
     return available.ToString();
   }
   public static string Read(string key, string offset, int length) {
-    if (length < 0 || length > 65536) throw new Exception("native-failure");
+    if (length < 0 || length > 524288) throw new Exception("native-failure");
     Entry entry=Get(key); if (entry.Directory) throw new Exception("native-failure");
     entry.Stream.Position=Int64.Parse(offset); byte[] bytes=new byte[length]; int read=entry.Stream.Read(bytes,0,length); return Convert.ToBase64String(bytes,0,read);
   }

@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { publishVerified, reconcilePublication } from "../src/download/publish";
 import type { CopyRecord } from "../src/state/store";
 import { rejection } from "./fixtures/rejection";
+import { countingFiles } from "./fixtures/counting-files";
 
 // 本地文件适配层在 macOS 与 Windows 上各有实现；Windows 实现背后是常驻桥接进程，测试结束时关闭。
 const nativeFiles = process.platform === "darwin" || process.platform === "win32";
@@ -20,7 +21,7 @@ let files: LocalFileSystem | undefined;
 const localFiles = () => files ??= systemFiles();
 afterAll(async () => { await files?.close(); });
 
-async function fixture(content = Buffer.from("synthetic downloadable bytes")) {
+async function fixture(content = Buffer.from("synthetic downloadable bytes"), fs?: LocalFileSystem) {
   const root = await mkdtemp(join(tmpdir(), "pikpak-transfer-test-")); let store = new Store(join(root, "db.sqlite"));
   const hash = new ContentHasher(BigInt(content.length)); hash.update(content); const digest = hash.digest();
   store.ensureAccount("account"); const share = store.accept("account", "share", root, "reference"); const scan = store.claimScan("account", share.id)!;
@@ -28,11 +29,11 @@ async function fixture(content = Buffer.from("synthetic downloadable bytes")) {
   store.transition("account", file.id, "ready");
   const copy: CopyRecord = { id: "copy", remoteId: "remote-copy", parentId: "parent", size: file.size, gcid: file.gcid,
     ownership: "unverified", state: "retained", operationId: "operation", evidence: null };
-  let workspace = await FileWorkspace.open(store, "account", share.id, localFiles());
+  let workspace = await FileWorkspace.open(store, "account", share.id, fs ?? localFiles());
   const metadata = async () => ({ id: copy.remoteId, parentId: "parent", name: "file.bin", size: file.size, gcid: file.gcid,
     raw: { links: { "application/octet-stream": { url: "https://example.mypikpak.net/synthetic" } } } });
   return { root, get store() { return store; }, file, copy, get workspace() { return workspace; }, digest, content, metadata,
-    reopen: async () => { await workspace.close(); store.close(); store = new Store(join(root, "db.sqlite")); workspace = await FileWorkspace.open(store, "account", share.id, localFiles()); },
+    reopen: async () => { await workspace.close(); store.close(); store = new Store(join(root, "db.sqlite")); workspace = await FileWorkspace.open(store, "account", share.id, fs ?? localFiles()); },
     close: async () => { await workspace.close(); store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 const rangeTransport = (content: Uint8Array): DownloadTransport => async (_, init) => {
@@ -233,4 +234,21 @@ test.if(nativeFiles)("已有进度时 Range 异常：第一次以顺序模式从
     expect(broken.store.delivery("account", broken.file.id)?.ranges?.mode).toBe("sequential");
   } finally { await broken.close(); }
 }, 60000);
+
+test.if(nativeFiles)("校验与发布不再重复整文件读回：分段路径只在并入时读一遍，顺序路径只在校验时读一遍", async () => {
+  const content = segmentedContent(37), size = content.length;
+  const parallel = countingFiles(localFiles()), f = await fixture(content, parallel.files);
+  try {
+    await download(f.store, "account", f.file, f.copy, f.workspace, f.metadata, new AbortController().signal, undefined, rangeTransport(f.content), { connections: 4, now: fastClock });
+    expect(f.store.file("account", f.file.id).state).toBe("completed");
+    expect(await readFile(f.store.delivery("account", f.file.id)!.targetPath)).toEqual(f.content);
+    expect(parallel.stats.readBytes).toBeLessThanOrEqual(size);
+  } finally { await f.close(); }
+  const sequential = countingFiles(localFiles()), g = await fixture(content, sequential.files);
+  try {
+    await download(g.store, "account", g.file, g.copy, g.workspace, g.metadata, new AbortController().signal, undefined, rangeTransport(g.content));
+    expect(g.store.file("account", g.file.id).state).toBe("completed");
+    expect(sequential.stats.readBytes).toBe(size);
+  } finally { await g.close(); }
+}, 120000);
 
