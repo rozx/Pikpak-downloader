@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import type { BunPlugin } from "bun";
 
 const root = resolve(import.meta.dir, "..");
-const targets = ["bun-darwin-arm64", "bun-darwin-x64", "bun-windows-x64", "bun-windows-arm64"] as const;
+const targets = ["bun-darwin-arm64", "bun-darwin-x64", "bun-windows-x64", "bun-windows-arm64", "bun-linux-x64", "bun-linux-arm64"] as const;
 type Target = typeof targets[number];
 const isTarget = (value: string): value is Target => targets.some(known => known === value);
 const requested = process.argv.slice(2);
@@ -24,9 +24,9 @@ const devtoolsStub: BunPlugin = {
 
 await mkdir(join(root, "dist"), { recursive: true });
 for (const target of selected) {
-  if (!isTarget(target)) throw Error("目标必须是声明的 macOS 或 Windows 架构");
+  if (!isTarget(target)) throw Error("目标必须是声明的 macOS、Windows 或 Linux 架构");
   const outfile = join(root, "dist", `pikpak-downloader-${target.replace("bun-", "")}${target.includes("windows") ? ".exe" : ""}`);
-  const platform = target.includes("windows") ? "win32" : "darwin";
+  const platform = target.includes("windows") ? "win32" : target.includes("linux") ? "linux" : "darwin";
   const arch = target.endsWith("arm64") ? "arm64" : "x64";
   const build = await Bun.build({
     entrypoints: [join(root, "src/main.ts")],

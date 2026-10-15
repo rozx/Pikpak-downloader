@@ -15,8 +15,8 @@
 
 ## 4. 构建与发布
 
-- [ ] 4.1 `scripts/build.ts` 新增 `bun-linux-x64` 与 `bun-linux-arm64`。验收：在 Windows 上交叉构建出两个 Linux 产物，x64 产物在 WSL 中能打印 `--version` 与帮助。
-- [ ] 4.2 发布工作流新增 Ubuntu 构建：运行 `bun run check` 并构建、上传 Linux 产物。验收：工作流 YAML 解析通过，发布步骤包含六个产物与校验和。
+- [x] 4.1 `scripts/build.ts` 新增 `bun-linux-x64` 与 `bun-linux-arm64`。验收：在 Windows 上交叉构建出两个 Linux 产物，x64 产物在 WSL 中能打印 `--version` 与帮助。
+- [x] 4.2 发布工作流新增 Ubuntu 构建：运行 `bun run check` 并构建、上传 Linux 产物。验收：工作流 YAML 解析通过，发布步骤包含六个产物与校验和。
 
 ## 5. 文档与验收
 
