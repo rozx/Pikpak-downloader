@@ -12,7 +12,6 @@ import { download, DownloadError, remainingBytes, type DownloadTransport } from 
 import { publishVerified, reconcilePublication } from "../download/publish";
 import { originalLink, secureDownloadUrl } from "../download/original-link";
 import { configuredConnections } from "../download/connections";
-import { ConnectionBudget } from "../download/budget";
 import { configuredActiveFiles } from "./active-files";
 import type { AccountTier } from "../pikpak/tier";
 
@@ -29,7 +28,6 @@ export class Engine {
   private readonly progressAt = new Map<string, number>();
   // 下载池（add-concurrent-file-downloads 决策 2）：已转存、正在下载、校验或发布的文件，每个有自己的中断控制器。
   private readonly pool = new Map<string, PoolEntry>();
-  private readonly budget = new ConnectionBudget();
   private preferFile = false;
   // 分段下载因限流降低后的并发，按账号在本次运行内记住，下一个文件从这个值开始（不持久化）。
   private readonly concurrency = new Map<string, number>();
@@ -220,7 +218,7 @@ export class Engine {
             const now = Date.now();
             if (now - (this.progressAt.get(target.id) ?? 0) >= 250) { this.progressAt.set(target.id, now); this.event({ type: "progress", id: target.id, bytes, size: target.size }); }
           }, this.http, { connections: configuredConnections(this.store), ...(remembered === undefined ? {} : { startConnections: remembered }),
-            onConcurrency: current => { this.concurrency.set(account, current); }, share: () => this.budget.share() });
+            onConcurrency: current => { this.concurrency.set(account, current); } });
           this.progressAt.delete(target.id);
           this.event({ type: "completed", id: target.id });
         };
@@ -241,9 +239,9 @@ export class Engine {
   }
   private launch(file: FileRecord, accessReference: string, delivery: Delivery): void {
     const entry: PoolEntry = { fileId: file.id, shareId: file.shareId, controller: new AbortController(), done: Promise.resolve() };
-    this.pool.set(file.id, entry); this.budget.register(file.id);
+    this.pool.set(file.id, entry);
     entry.done = this.deliver(file, accessReference, entry.controller.signal, delivery).then(() => {}, () => {}).finally(() => {
-      this.pool.delete(file.id); this.budget.release(file.id); this.progressAt.delete(file.id);
+      this.pool.delete(file.id); this.progressAt.delete(file.id);
       this.event({ type: "released", id: file.id });
     });
   }

@@ -94,9 +94,8 @@ export class ConnectionGate {
   // 冷却期内不发起新请求（限流处理，见决策 7）。
   coolDown(until: number): void { this.cooldownUntil = Math.max(this.cooldownUntil, until); }
   waitMs(): number { return Math.max(0, this.cooldownUntil - this.now(), this.probed ? this.lastStart + 1000 - this.now() : 0); }
-  // share：跨文件连接预算分给本文件的份额（多文件同时下载时），不超过它才补新连接。
-  canStart(active: number, remaining: number, share = Infinity): boolean {
-    const limit = Math.min(this.current, remaining, share);
+  canStart(active: number, remaining: number): boolean {
+    const limit = Math.min(this.current, remaining);
     if (active >= limit || this.now() < this.cooldownUntil) return false;
     if (active === 0) return true;
     return this.probed && this.now() - this.lastStart >= 1000;

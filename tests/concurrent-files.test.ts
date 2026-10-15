@@ -279,3 +279,32 @@ test.if(nativeFiles)("多个文件下载中停止会话，重新启动后各自�
   } finally { abort.abort(); await running; await f.close(); }
 }, 60000);
 
+test.if(nativeFiles)("每个在途文件各自使用连接数设置，不因同时下载的文件数而减少", async () => {
+  const size = 8 * 1048576 + 1;
+  const f = await engineFixture(localFiles(), 5, Array(5).fill(size)); f.state.limit = 10n ** 12n;
+  f.store.setConfig("max_active_files", "5"); f.store.setConfig("download_connections", "2");
+  // 按副本统计同时在途的 Range 请求（直到响应体读完）。
+  const active = new Map<string, number>(), peak = new Map<string, number>();
+  const fetch = async (url: string, init: RequestInit) => {
+    const copy = new URL(url).pathname;
+    active.set(copy, (active.get(copy) ?? 0) + 1); peak.set(copy, Math.max(peak.get(copy) ?? 0, active.get(copy)!));
+    const response = await f.fetch(url, init);
+    const reader = response.body!.getReader(); let open = true;
+    const done = () => { if (open) { open = false; active.set(copy, active.get(copy)! - 1); } };
+    const stream = new ReadableStream<Uint8Array>({
+      async pull(controller) { const part = await reader.read(); if (part.done) { done(); controller.close(); } else controller.enqueue(part.value); },
+      cancel() { done(); reader.cancel().catch(() => {}); },
+    });
+    return new Response(stream, { status: response.status, headers: response.headers });
+  };
+  const engine = new Engine(f.store, f.secrets, new Drive(f.api, "account"), localFiles(), () => {}, fetch, async () => {}, { tier: paid });
+  try {
+    await drain(engine);
+    expect(completed(f)).toBe(5);
+    expect(peak.size).toBe(5);
+    // 旧的全局预算下 5 个文件各只能 1 个连接；现在至少有文件用到了自己的 2 个连接，且没有文件超过设置。
+    expect(Math.max(...peak.values())).toBe(2);
+    expect([...peak.values()].every(value => value <= 2)).toBe(true);
+  } finally { await f.close(); }
+}, 120000);
+

@@ -60,8 +60,6 @@ export type SegmentedDownload = {
   signal: AbortSignal; progress: (bytes: bigint) => void; now?: () => number; headerTimeoutMs?: number; stallTimeoutMs?: number;
   // 起始并发（同一账号上一个文件降低后的值）与并发变化通知，由 engine 在本次运行内按账号记住。
   startConnections?: number; onConcurrency?: (current: number) => void;
-  // 跨文件连接预算的当前份额；未提供时不受预算限制。
-  share?: () => number;
 };
 
 // 有界窗口内多连接下载一个文件（决策 3–5）。返回连续前缀推进到文件末尾时的 GCID 与 SHA-256；
@@ -165,7 +163,7 @@ export async function downloadSegmented(options: SegmentedDownload): Promise<{ g
 
   try {
     while (!plan.finished && failure === null && !signal.aborted) {
-      for (let chunk: Chunk | null; gate.canStart(active.size, plan.remaining(), options.share?.() ?? Infinity) && (chunk = plan.claim());) {
+      for (let chunk: Chunk | null; gate.canStart(active.size, plan.remaining()) && (chunk = plan.claim());) {
         gate.started();
         const running: Promise<void> = worker(chunk).finally(() => { active.delete(running); });
         active.add(running);

@@ -1,10 +1,10 @@
-// P3b：多个文件同时下载（add-concurrent-file-downloads 决策 1）。每个文件 1 个 Range 连接、使用各自的签名地址，
+// P3b：多个文件同时下载（add-concurrent-file-downloads 决策 1）。每个文件使用各自的签名地址和 --connections 个 Range 连接（默认 1），
 // 1/2/3/5 个文件轮流各运行 3 次，记录合计吞吐、每个文件的速率与 429/403/402 次数。
 // 只读取本工具任务库里保留中的云端副本；不写本地文件，不输出签名地址、凭据或文件名。
 //
 // 用法（需先退出正在运行的界面或 watch，本程序持有执行锁）：
 //   bun spikes/concurrent-files/p3b-files.ts --list
-//   bun spikes/concurrent-files/p3b-files.ts <文件任务ID>... [--out 结果.json] [--seconds 30]
+//   bun spikes/concurrent-files/p3b-files.ts <文件任务ID>... [--out 结果.json] [--seconds 30] [--connections 1-8] [--rounds 3]
 import { writeFile } from "node:fs/promises";
 import { prepareState } from "../../src/state/paths";
 import { acquireQueueLock } from "../../src/state/lock";
@@ -21,6 +21,8 @@ const args = process.argv.slice(2);
 const option = (name: string) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
 const ids = args.filter((value, index) => !value.startsWith("--") && !args[index - 1]?.startsWith("--"));
 const seconds = Number(option("--seconds") ?? 30), output = option("--out");
+const perFile = Number(option("--connections") ?? 1), rounds = Number(option("--rounds") ?? 3);
+if (!Number.isInteger(perFile) || perFile < 1 || perFile > 8) throw Error("--connections 取 1–8");
 
 const paths = await prepareState();
 const lock = acquireQueueLock(paths.lock);
@@ -54,7 +56,7 @@ try {
     return { size: file.size, url: endpoint.url.href, cursor: 0n };
   }));
   const counts = [1, 2, 3, 5].filter(count => count <= files.length);
-  console.log(`P3b 多文件并发：${files.length} 个副本，每轮 ${seconds} 秒，${counts.join("/")} 个文件各 3 轮（轮流进行），每个文件 1 个连接`);
+  console.log(`P3b 多文件并发：${files.length} 个副本，每轮 ${seconds} 秒，${counts.join("/")} 个文件各 ${rounds} 轮（轮流进行），每个文件 ${perFile} 个连接`);
 
   type FileRun = { bytes: number; statuses: Record<string, number>; rateLimited: number; forbidden: number; quota: number; errors: number; retryAfterMs: number[] };
   type Run = { files: number; round: number; seconds: number; MiBps: number; perFileKiBps: number[]; detail: FileRun[] };
@@ -64,6 +66,16 @@ try {
     const signal = AbortSignal.any([deadline.signal, stop.signal]), started = performance.now();
     const detail = await Promise.all(files.slice(0, count).map(async target => {
       const run: FileRun = { bytes: 0, statuses: {}, rateLimited: 0, forbidden: 0, quota: 0, errors: 0, retryAfterMs: [] };
+      // 同一文件的多个连接共用该文件的偏移游标，各自领取下一段。
+      await Promise.all(Array.from({ length: perFile }, () => connection(target, run, signal)));
+      return run;
+    }));
+    clearTimeout(timer);
+    const elapsed = (performance.now() - started) / 1000, total = detail.reduce((sum, item) => sum + item.bytes, 0);
+    return { files: count, round, seconds: Math.round(elapsed * 10) / 10, MiBps: Math.round(total / MiB / elapsed * 1000) / 1000,
+      perFileKiBps: detail.map(item => Math.round(item.bytes / 1024 / elapsed)), detail };
+  };
+  const connection = async (target: (typeof files)[number], run: FileRun, signal: AbortSignal) => {
       while (!signal.aborted) {
         if (target.cursor >= target.size) target.cursor = 0n;
         const start = target.cursor, end = start + REQUEST - 1n < target.size ? start + REQUEST - 1n : target.size - 1n;
@@ -85,14 +97,8 @@ try {
         catch { if (!signal.aborted) run.errors++; }
         finally { reader.cancel().catch(() => {}); }
       }
-      return run;
-    }));
-    clearTimeout(timer);
-    const elapsed = (performance.now() - started) / 1000, total = detail.reduce((sum, item) => sum + item.bytes, 0);
-    return { files: count, round, seconds: Math.round(elapsed * 10) / 10, MiBps: Math.round(total / MiB / elapsed * 1000) / 1000,
-      perFileKiBps: detail.map(item => Math.round(item.bytes / 1024 / elapsed)), detail };
   };
-  for (let round = 1; round <= 3 && !stop.signal.aborted; round++) {
+  for (let round = 1; round <= rounds && !stop.signal.aborted; round++) {
     for (const count of counts) {
       if (stop.signal.aborted) break;
       const run = await once(count, round);
@@ -114,7 +120,7 @@ try {
   const single = summary[0]?.medianMiBps || NaN;
   const ratios = Object.fromEntries(summary.map(item => [item.files, Math.round(item.medianMiBps / single * 100) / 100]));
   console.log(JSON.stringify({ summary, ratiosToSingle: ratios }));
-  if (output) await writeFile(output, `${JSON.stringify({ at: new Date().toISOString(), secondsPerRun: seconds, copiesMiB: files.map(item => Math.round(Number(item.size) / MiB)), runs, summary, ratiosToSingle: ratios }, null, 2)}\n`);
+  if (output) await writeFile(output, `${JSON.stringify({ at: new Date().toISOString(), secondsPerRun: seconds, connectionsPerFile: perFile, copiesMiB: files.map(item => Math.round(Number(item.size) / MiB)), runs, summary, ratiosToSingle: ratios }, null, 2)}\n`);
 } catch (error) {
   console.log(`P3b 未完成：${error instanceof Error ? error.message : "未知错误"}`);
   process.exitCode = 1;
