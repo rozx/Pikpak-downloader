@@ -7,7 +7,8 @@ import { failurePage, insufficientPage, landingPage, successPage } from "./login
 
 async function openBrowser(url: string): Promise<void> {
   const command = process.platform === "darwin" ? ["/usr/bin/open", url]
-    : process.platform === "win32" ? ["rundll32.exe", "url.dll,FileProtocolHandler", url] : null;
+    : process.platform === "win32" ? ["rundll32.exe", "url.dll,FileProtocolHandler", url]
+    : process.platform === "linux" ? ["xdg-open", url] : null;
   if (!command) throw new AppError("unsupported_platform");
   const child = Bun.spawn(command, { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
   if (await child.exited !== 0) throw new AppError("authorization_failed");

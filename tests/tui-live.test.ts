@@ -101,13 +101,14 @@ test("打开目录：按平台构造参数且不经过 shell，目录不存在�
     const folder = join(root, "带 空格 的目录"); await mkdir(folder); await writeFile(join(root, "file.txt"), "x");
     expect(directoryCommand("win32", folder)).toEqual(["explorer.exe", folder]);
     expect(directoryCommand("darwin", folder)).toEqual(["/usr/bin/open", folder]);
-    expect(() => directoryCommand("linux", folder)).toThrow();
+    expect(directoryCommand("linux", folder)).toEqual(["xdg-open", folder]);
+    expect(() => directoryCommand("freebsd", folder)).toThrow();
     const launched: string[][] = [];
     expect(await openDirectory(folder, command => { launched.push(command); }, "win32")).toEqual({ ok: true });
     expect(launched).toEqual([["explorer.exe", folder]]);
     expect(await openDirectory(join(root, "missing"), command => { launched.push(command); }, "win32")).toEqual({ ok: false, reason: "output_unavailable" });
     expect(await openDirectory(join(root, "file.txt"), command => { launched.push(command); }, "win32")).toEqual({ ok: false, reason: "output_unavailable" });
-    expect(await openDirectory(folder, command => { launched.push(command); }, "linux")).toEqual({ ok: false, reason: "unsupported_platform" });
+    expect(await openDirectory(folder, command => { launched.push(command); }, "freebsd")).toEqual({ ok: false, reason: "unsupported_platform" });
     expect(launched).toHaveLength(1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { AppError } from "../errors";
 
@@ -7,6 +7,11 @@ export function stateRoot(environment = process.env, platform = process.platform
   if (environment.PIKPAK_DOWNLOADER_STATE_DIR) return resolve(environment.PIKPAK_DOWNLOADER_STATE_DIR);
   if (platform === "darwin") return join(homedir(), "Library", "Application Support", "PikpakDownloader");
   if (platform === "win32" && environment.LOCALAPPDATA) return join(environment.LOCALAPPDATA, "PikpakDownloader");
+  // XDG Base Directory 规范要求忽略相对路径的 XDG_DATA_HOME。
+  if (platform === "linux") {
+    const data = environment.XDG_DATA_HOME;
+    return join(data && isAbsolute(data) ? data : join(homedir(), ".local", "share"), "PikpakDownloader");
+  }
   throw new AppError("unsupported_platform");
 }
 

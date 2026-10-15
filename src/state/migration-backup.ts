@@ -14,7 +14,8 @@ export function migrationBackup(source: Database, databasePath: string, version:
     const file = openSync(temporary, "r+");
     try { fsyncSync(file); } finally { closeSync(file); }
     linkSync(temporary, destination);
-    if (process.platform === "darwin") {
+    // Windows 不能打开目录句柄同步；其他平台同步目录，让新链接落盘。
+    if (process.platform !== "win32") {
       const directory = openSync(dirname(destination), "r");
       try { fsyncSync(directory); } finally { closeSync(directory); }
     }

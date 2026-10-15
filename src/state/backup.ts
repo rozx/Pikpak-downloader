@@ -16,7 +16,8 @@ export async function writeBackup(store: Store, destination: string): Promise<vo
     const file = await open(temporary, "r+");
     try { await file.sync(); } finally { await file.close(); }
     await link(temporary, destination);
-    if (process.platform === "darwin") {
+    // Windows 不能打开目录句柄同步；其他平台同步目录，让新链接落盘。
+    if (process.platform !== "win32") {
       const directory = await open(dirname(destination), "r");
       try { await directory.sync(); } finally { await directory.close(); }
     }

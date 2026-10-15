@@ -7,6 +7,7 @@ export type Launch = (command: string[]) => void;
 export function directoryCommand(platform: NodeJS.Platform, path: string): string[] {
   if (platform === "win32") return ["explorer.exe", path];
   if (platform === "darwin") return ["/usr/bin/open", path];
+  if (platform === "linux") return ["xdg-open", path];
   throw new AppError("unsupported_platform");
 }
 // explorer.exe 成功打开时也常返回非零退出码，因此只确认目录存在并成功启动进程。
