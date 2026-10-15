@@ -11,7 +11,8 @@ TypeScript + Bun 开发中的独立 CLI：监听完整分享文本，逐文件�
 ```sh
 bun install --frozen-lockfile
 bun run check
-bun run dev --help
+bun run dev                   # 从源码运行并监视改动，保存后自动重启
+bun run start --help          # 从源码运行一次，不监视改动
 bun run build bun-darwin-arm64 bun-windows-x64
 bun scripts/preview-tui.tsx   # 用模拟数据预览全屏界面，不读写任务库
 ```

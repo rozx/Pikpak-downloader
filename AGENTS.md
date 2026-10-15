@@ -14,7 +14,8 @@ bun run check                                  # 原生模块（仅 macOS）+ �
 bun run typecheck                              # tsc --noEmit：严格模式，覆盖 src/、tests/、scripts/
 bun test tests/space.test.ts                   # 运行单个测试文件
 bun test tests/tui-screens.test.tsx -t "全部释放"   # 按测试名过滤
-bun run dev --help                             # 从源码运行 CLI（src/cli.ts）；无参数且在交互终端中时进入全屏界面
+bun run dev                                    # 从源码运行并监视改动，保存后自动重启；无参数且在交互终端中时进入全屏界面
+bun run start --help                           # 从源码运行一次 CLI（src/cli.ts），不监视改动
 bun scripts/preview-tui.tsx                    # 用模拟数据预览全屏界面，不读写任务库
 bun run build bun-windows-x64                  # 单文件产物输出到 dist/；目标为 bun-{darwin,windows}-{arm64,x64}，默认取当前平台
 ```
