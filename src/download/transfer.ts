@@ -42,7 +42,7 @@ export async function remainingBytes(store: Store, accountId: string, file: File
 }
 
 export type DownloadOptions = { connections?: number; now?: () => number; headerTimeoutMs?: number; stallTimeoutMs?: number;
-  startConnections?: number; onConcurrency?: (current: number) => void };
+  startConnections?: number; onConcurrency?: (current: number) => void; share?: () => number };
 
 // 连接数大于 1、文件超过一个分块且没有持久化为顺序模式时走分段路径（add-parallel-segment-download），否则走单连接顺序路径。
 // 两条路径共用最后的版本核对、读回校验与发布。
@@ -138,7 +138,7 @@ export async function download(store: Store, accountId: string, file: FileRecord
           ...(options.now ? { now: options.now } : {}), ...(options.headerTimeoutMs === undefined ? {} : { headerTimeoutMs: options.headerTimeoutMs }),
           ...(options.stallTimeoutMs === undefined ? {} : { stallTimeoutMs: options.stallTimeoutMs }),
           ...(options.startConnections === undefined ? {} : { startConnections: options.startConnections }),
-          ...(options.onConcurrency ? { onConcurrency: options.onConcurrency } : {}) });
+          ...(options.onConcurrency ? { onConcurrency: options.onConcurrency } : {}), ...(options.share ? { share: options.share } : {}) });
         await check();
       } catch (error) {
         if (!(error instanceof SequentialFallback)) throw error;

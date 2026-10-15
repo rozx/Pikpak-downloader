@@ -134,10 +134,12 @@ export class Store {
     if (retries >= 3n) this.finishScan(scan, false, "scan_retry_exhausted");
     else this.run("UPDATE scans SET retries=retries+1,cursor_json=? WHERE id=?", JSON.stringify({ retryAt: now + 1000 * 2 ** Number(retries) }), scan.id);
   }
-  nextFile(accountId: string, now = Date.now()): FileRecord | null {
+  // exclude：已在下载池中的文件，不再重复调度。
+  nextFile(accountId: string, now = Date.now(), exclude: string[] = []): FileRecord | null {
     const row = this.get<{ id: string }>(`SELECT f.id FROM files f JOIN shares s ON s.id=f.share_id WHERE f.account_id=? AND f.cancelled=0 AND s.cancelled=0
       AND f.state IN ('discovered','ready','saving','awaiting_remote','downloading','verifying','publishing','reconciling','retry_wait','waiting_space')
-      AND (f.retry_at IS NULL OR f.retry_at<=?) ORDER BY CASE WHEN f.state IN ('publishing','reconciling') THEN 0 ELSE 1 END,f.rowid LIMIT 1`, accountId, now);
+      AND (f.retry_at IS NULL OR f.retry_at<=?) AND f.id NOT IN (SELECT value FROM json_each(?))
+      ORDER BY CASE WHEN f.state IN ('publishing','reconciling') THEN 0 ELSE 1 END,f.rowid LIMIT 1`, accountId, now, JSON.stringify(exclude));
     return row ? this.file(accountId, row.id) : null;
   }
   waitForSpace(accountId: string, fileId: string, now = Date.now()): void {

@@ -12,13 +12,24 @@ import { download, DownloadError, remainingBytes, type DownloadTransport } from 
 import { publishVerified, reconcilePublication } from "../download/publish";
 import { originalLink, secureDownloadUrl } from "../download/original-link";
 import { configuredConnections } from "../download/connections";
+import { ConnectionBudget } from "../download/budget";
+import { configuredActiveFiles } from "./active-files";
+import type { AccountTier } from "../pikpak/tier";
 
 export type RuntimeEvent = { type: string; id?: string; reason?: string; count?: number; bytes?: bigint; size?: bigint };
+export type ActiveTarget = { fileId: string; shareId: string };
+export type EngineOptions = { tier?: Pick<AccountTier, "refresh" | "cap"> };
+type Delivery = (workspace: FileWorkspace, signal: AbortSignal) => Promise<void>;
+type PoolEntry = ActiveTarget & { controller: AbortController; done: Promise<void> };
 export class Engine {
   private readonly restore: Restore;
   private readonly space: SpaceManager;
   private blocked = false;
-  private lastProgress = 0;
+  // 进度节流按文件分别计算，多个文件同时下载时互不挤占。
+  private readonly progressAt = new Map<string, number>();
+  // 下载池（add-concurrent-file-downloads 决策 2）：已转存、正在下载、校验或发布的文件，每个有自己的中断控制器。
+  private readonly pool = new Map<string, PoolEntry>();
+  private readonly budget = new ConnectionBudget();
   private preferFile = false;
   // 分段下载因限流降低后的并发，按账号在本次运行内记住，下一个文件从这个值开始（不持久化）。
   private readonly concurrency = new Map<string, number>();
@@ -26,7 +37,7 @@ export class Engine {
   constructor(private readonly store: Store, private readonly secrets: SecretStore, private readonly drive: Drive,
     private readonly filesystem: LocalFileSystem, private readonly report: (event: RuntimeEvent) => void = () => {},
     private readonly http?: DownloadTransport,
-    wait?: (ms: number, signal?: AbortSignal) => Promise<void>) {
+    wait?: (ms: number, signal?: AbortSignal) => Promise<void>, private readonly options: EngineOptions = {}) {
     this.restore = new Restore(store, secrets, drive, wait); this.space = new SpaceManager(store, drive, wait);
   }
   subscribe(listener: (event: RuntimeEvent) => void): () => void {
@@ -40,6 +51,19 @@ export class Engine {
     if (reason === "database") this.blocked = true;
     try { this.store.pause(this.drive.accountId, reason, fileId ?? null); } catch { this.blocked = true; }
     this.event({ type: "paused", reason, ...(fileId ? { id: fileId } : {}) });
+    // 账号级暂停对所有在途文件都生效：其余文件在安全点停止并保存检查点。
+    this.haltPool(fileId);
+  }
+  private haltPool(except?: string): void { for (const entry of this.pool.values()) if (entry.fileId !== except) entry.controller.abort(); }
+  // 实际生效的同时下载数：配置值与账号等级上限中的较小值；未提供等级时按未知处理（1）。
+  capacity(): number { return Math.min(configuredActiveFiles(this.store), this.options.tier?.cap ?? 1); }
+  activeFiles(): ActiveTarget[] { return [...this.pool.values()].map(({ fileId, shareId }) => ({ fileId, shareId })); }
+  isPooled(fileId: string): boolean { return this.pool.has(fileId); }
+  // 中断匹配的在途文件，等它们在安全点返回（检查点已保存）。
+  async stopActive(match: (target: ActiveTarget) => boolean = () => true): Promise<void> {
+    const entries = [...this.pool.values()].filter(match);
+    for (const entry of entries) entry.controller.abort();
+    await Promise.allSettled(entries.map(entry => entry.done));
   }
   blockPersistence(): void { this.pause("database"); }
   private async local(file: FileRecord): Promise<FileWorkspace> {
@@ -111,7 +135,10 @@ export class Engine {
     const account = this.drive.accountId;
     // 用户暂停与系统暂停分开记录，任一存在都不调度新的扫描、转存、下载或回收；对已发出操作的核对不受影响。
     if (signal.aborted || this.blocked || this.store.paused(account) || this.store.config("queue_paused") === "1" || this.store.rateLimited(account)) return false;
-    const preferred = this.preferFile ? this.store.nextFile(account) : null;
+    await this.options.tier?.refresh(signal);
+    // 没有空余名额时不选新文件，但仍可以扫描。
+    const capacity = this.capacity(), room = this.pool.size < capacity, busy = [...this.pool.keys()];
+    const preferred = this.preferFile && room ? this.store.nextFile(account, Date.now(), busy) : null;
     const scan = preferred ? null : this.store.nextScan(account);
     if (scan) {
       this.preferFile = true;
@@ -132,84 +159,120 @@ export class Engine {
       }
       return true;
     }
-    let file = preferred ?? this.store.nextFile(account);
+    if (!room) return false;
+    let file = preferred ?? this.store.nextFile(account, Date.now(), busy);
     if (!file) return false;
     this.preferFile = false;
     const accessReference = this.store.operationFor(account, file.id, "restore")?.secretRef ?? this.store.share(account, file.shareId).secretRef;
+    // 串行部分：占用名额、检查已有副本、本地空间预检、空间计划与转存。下载、校验与发布交给 delivery。
+    let delivery: Delivery | null = null;
     let workspace: FileWorkspace | undefined;
     try {
       if (["discovered", "retry_wait", "waiting_space"].includes(file.state)) { this.store.transition(account, file.id, "ready"); file = this.store.file(account, file.id); }
       if (file.state === "publishing" || (file.state === "reconciling" && this.store.delivery(account, file.id)?.sha256)) {
-        workspace = await this.local(file);
-        if (!await reconcilePublication(this.store, account, file, workspace, signal)) {
-          const delivery = this.store.delivery(account, file.id)!;
-          await publishVerified(this.store, account, file, workspace, { gcid: file.gcid, sha256: delivery.sha256! }, signal);
-        }
-        this.event({ type: "completed", id: file.id }); return true;
-      }
-      let copy = this.store.copyForFile(account, file.id);
-      if (copy) {
-        try {
-          const current = await this.drive.file(copy.remoteId, signal);
-          if (current.size !== file.size || current.gcid !== file.gcid) {
-            this.store.copyState(account, copy.id, "protected"); this.store.fileError(account, file.id, "copy_version_changed"); return true;
+        const target = file;
+        delivery = async (local, taskSignal) => {
+          if (!await reconcilePublication(this.store, account, target, local, taskSignal)) {
+            const saved = this.store.delivery(account, target.id)!;
+            await publishVerified(this.store, account, target, local, { gcid: target.gcid, sha256: saved.sha256! }, taskSignal);
           }
-        } catch (error) {
-          if (definitelyMissing(error)) {
-            this.store.copyState(account, copy.id, "deleted");
-            if (!this.store.resaveMissing(account, file.id)) return true;
-            copy = null; file = this.store.file(account, file.id);
-          } else throw error;
+          this.event({ type: "completed", id: target.id });
+        };
+      } else {
+        let copy = this.store.copyForFile(account, file.id);
+        if (copy) {
+          try {
+            const current = await this.drive.file(copy.remoteId, signal);
+            if (current.size !== file.size || current.gcid !== file.gcid) {
+              this.store.copyState(account, copy.id, "protected"); this.store.fileError(account, file.id, "copy_version_changed"); return true;
+            }
+          } catch (error) {
+            if (definitelyMissing(error)) {
+              this.store.copyState(account, copy.id, "deleted");
+              if (!this.store.resaveMissing(account, file.id)) return true;
+              copy = null; file = this.store.file(account, file.id);
+            } else throw error;
+          }
         }
+        if (!copy && file.size > (await this.drive.quota(signal)).limit) { this.store.fileError(account, file.id, "file_exceeds_cloud_capacity"); return true; }
+        workspace = await this.local(file);
+        const remaining = await remainingBytes(this.store, account, file, workspace, signal);
+        if (await workspace.freeBytes() < remaining + 1048576n) { this.pause("local_space", file.id); return false; }
+        if (!copy) {
+          this.event({ type: "saving", id: file.id });
+          const previous = this.store.operationFor(account, file.id, "restore");
+          if (!previous?.payload.sent) {
+            await this.restore.checkSource(file, signal);
+            const space = await this.space.ensure(file.size, signal);
+            if (space === "too_large") { this.store.fileError(account, file.id, "file_exceeds_cloud_capacity"); return true; }
+            if (space !== "ready") { this.store.waitForSpace(account, file.id); this.event({ type: "waiting_space", id: file.id, reason: space }); return true; }
+          }
+          copy = await this.restore.ensure(file, signal);
+        }
+        file = this.store.file(account, file.id);
+        if (file.cancelled || this.store.share(account, file.shareId).cancelled) return true;
+        if (file.state === "saving") this.store.transition(account, file.id, "reconciling");
+        const target = file, remote = copy;
+        delivery = async (local, taskSignal) => {
+          this.event({ type: "downloading", id: target.id });
+          const remembered = this.concurrency.get(account);
+          await download(this.store, account, target, remote, local, () => this.drive.file(remote.remoteId, taskSignal), taskSignal, bytes => {
+            const now = Date.now();
+            if (now - (this.progressAt.get(target.id) ?? 0) >= 250) { this.progressAt.set(target.id, now); this.event({ type: "progress", id: target.id, bytes, size: target.size }); }
+          }, this.http, { connections: configuredConnections(this.store), ...(remembered === undefined ? {} : { startConnections: remembered }),
+            onConcurrency: current => { this.concurrency.set(account, current); }, share: () => this.budget.share() });
+          this.progressAt.delete(target.id);
+          this.event({ type: "completed", id: target.id });
+        };
       }
-      if (!copy && file.size > (await this.drive.quota(signal)).limit) { this.store.fileError(account, file.id, "file_exceeds_cloud_capacity"); return true; }
-      workspace = await this.local(file);
-      const remaining = await remainingBytes(this.store, account, file, workspace, signal);
-      if (await workspace.freeBytes() < remaining + 1048576n) { this.pause("local_space", file.id); return false; }
-      if (!copy) {
-        this.event({ type: "saving", id: file.id });
-        const previous = this.store.operationFor(account, file.id, "restore");
-        if (!previous?.payload.sent) {
-          await this.restore.checkSource(file, signal);
-          const capacity = await this.space.ensure(file.size, signal);
-          if (capacity === "too_large") { this.store.fileError(account, file.id, "file_exceeds_cloud_capacity"); return true; }
-          if (capacity !== "ready") { this.store.waitForSpace(account, file.id); this.event({ type: "waiting_space", id: file.id, reason: capacity }); return true; }
-        }
-        copy = await this.restore.ensure(file, signal);
+    } catch (error) { return this.failed(error, file, accessReference, signal); }
+    finally { await workspace?.close(); }
+    // 同时下载数为 1 时在本步内完成，顺序与单执行器相同；否则交给下载池并立即返回。
+    if (capacity === 1) return this.deliver(file, accessReference, signal, delivery);
+    this.launch(file, accessReference, delivery);
+    return true;
+  }
+
+  private async deliver(file: FileRecord, accessReference: string, signal: AbortSignal, delivery: Delivery): Promise<boolean> {
+    let workspace: FileWorkspace | undefined;
+    try { workspace = await this.local(file); await delivery(workspace, signal); return true; }
+    catch (error) { return this.failed(error, file, accessReference, signal); }
+    finally { await workspace?.close(); }
+  }
+  private launch(file: FileRecord, accessReference: string, delivery: Delivery): void {
+    const entry: PoolEntry = { fileId: file.id, shareId: file.shareId, controller: new AbortController(), done: Promise.resolve() };
+    this.pool.set(file.id, entry); this.budget.register(file.id);
+    entry.done = this.deliver(file, accessReference, entry.controller.signal, delivery).then(() => {}, () => {}).finally(() => {
+      this.pool.delete(file.id); this.budget.release(file.id); this.progressAt.delete(file.id);
+      this.event({ type: "released", id: file.id });
+    });
+  }
+
+  // 下载、转存与发布错误的分类；串行步骤与下载池共用。返回值与 step 相同。
+  private async failed(error: unknown, file: FileRecord, accessReference: string, signal: AbortSignal): Promise<boolean> {
+    const account = this.drive.accountId;
+    if (signal.aborted) return false;
+    const current = this.store.file(account, file.id);
+    const code = (error as { code?: string }).code;
+    if (this.store.paused(account)) return false;
+    if (code === "ENOSPC") this.pause("local_space", file.id);
+    else if (["EACCES", "EROFS", "ENODEV", "native-session-closed"].includes(code ?? (error instanceof Error ? error.message : ""))) this.pause("target_unavailable", file.id);
+    else if (error instanceof AppError && ["authorization_failed", "login_required", "credentials_unavailable", "account_mismatch"].includes(error.code)) this.pause("authentication");
+    else if ((error instanceof ShareScanError && error.code === "access_required") || (error instanceof AppError && error.code === "share_access_required")) {
+      if (this.store.share(account, file.shareId).secretRef === accessReference) this.store.fileError(account, file.id, "access_required");
+    } else if (error instanceof ShareScanError) this.store.fileError(account, file.id, error.code);
+    else if ((error instanceof DownloadError && error.code === "version_changed") || (error instanceof Error && error.message === "source-version-changed")) {
+      this.store.fileError(account, file.id, "version_changed"); this.store.requestRescan(account, file.shareId);
+    } else if (current.state === "publishing" || error instanceof AppError || (error instanceof ProviderError && error.status === 404)) this.store.fileError(account, file.id, "needs_reconciliation", true);
+    else if (error instanceof DownloadError || error instanceof ProviderError) {
+      if ((error instanceof DownloadError && error.code === "traffic_quota") || (error instanceof ProviderError && (error.status === 402 || ["download_quota_exceeded", "download_traffic_not_enough", "download_flow_not_enough", "traffic_limit_exceeded"].includes(error.reason)))) this.pause("traffic_quota", file.id);
+      else if ((error instanceof DownloadError && error.code === "rate_limited") || (error instanceof ProviderError && error.status === 429)) {
+        // 账号限流同样对所有在途文件生效。
+        this.store.rateLimit(account, error.retryAfterMs ?? 60000); this.store.transientFailure(account, file.id, "rate_limited"); this.haltPool(file.id);
       }
-      file = this.store.file(account, file.id);
-      if (file.cancelled || this.store.share(account, file.shareId).cancelled) return true;
-      if (file.state === "saving") this.store.transition(account, file.id, "reconciling");
-      this.event({ type: "downloading", id: file.id });
-      const remembered = this.concurrency.get(account);
-      await download(this.store, account, file, copy, workspace, () => this.drive.file(copy!.remoteId, signal), signal, bytes => {
-        if (Date.now() - this.lastProgress >= 250) { this.lastProgress = Date.now(); this.event({ type: "progress", id: file!.id, bytes, size: file!.size }); }
-      }, this.http, { connections: configuredConnections(this.store), ...(remembered === undefined ? {} : { startConnections: remembered }),
-        onConcurrency: current => { this.concurrency.set(account, current); } });
-      this.event({ type: "completed", id: file.id }); return true;
-    } catch (error) {
-      if (signal.aborted) return false;
-      const current = this.store.file(account, file.id);
-      const code = (error as { code?: string }).code;
-      if (this.store.paused(account)) return false;
-      if (code === "ENOSPC") this.pause("local_space", file.id);
-      else if (["EACCES", "EROFS", "ENODEV", "native-session-closed"].includes(code ?? (error instanceof Error ? error.message : ""))) this.pause("target_unavailable", file.id);
-      else if (error instanceof AppError && ["authorization_failed", "login_required", "credentials_unavailable", "account_mismatch"].includes(error.code)) this.pause("authentication");
-      else if ((error instanceof ShareScanError && error.code === "access_required") || (error instanceof AppError && error.code === "share_access_required")) {
-        if (this.store.share(account, file.shareId).secretRef === accessReference) this.store.fileError(account, file.id, "access_required");
-      } else if (error instanceof ShareScanError) this.store.fileError(account, file.id, error.code);
-      else if ((error instanceof DownloadError && error.code === "version_changed") || (error instanceof Error && error.message === "source-version-changed")) {
-        this.store.fileError(account, file.id, "version_changed"); this.store.requestRescan(account, file.shareId);
-      } else if (current.state === "publishing" || error instanceof AppError || (error instanceof ProviderError && error.status === 404)) this.store.fileError(account, file.id, "needs_reconciliation", true);
-      else if (error instanceof DownloadError || error instanceof ProviderError) {
-        if ((error instanceof DownloadError && error.code === "traffic_quota") || (error instanceof ProviderError && (error.status === 402 || ["download_quota_exceeded", "download_traffic_not_enough", "download_flow_not_enough", "traffic_limit_exceeded"].includes(error.reason)))) this.pause("traffic_quota", file.id);
-        else if ((error instanceof DownloadError && error.code === "rate_limited") || (error instanceof ProviderError && error.status === 429)) {
-          this.store.rateLimit(account, error.retryAfterMs ?? 60000); this.store.transientFailure(account, file.id, "rate_limited");
-        }
-        else this.store.transientFailure(account, file.id, error instanceof DownloadError ? error.code : "remote_request_failed");
-      } else if (code?.startsWith("SQLITE_")) this.pause("database");
-      else this.store.fileError(account, file.id, "local_operation_failed", true);
-      this.event({ type: "file_waiting", id: file.id, reason: this.store.file(account, file.id).lastError ?? "paused" }); return true;
-    } finally { await workspace?.close(); }
+      else this.store.transientFailure(account, file.id, error instanceof DownloadError ? error.code : "remote_request_failed");
+    } else if (code?.startsWith("SQLITE_")) this.pause("database");
+    else this.store.fileError(account, file.id, "local_operation_failed", true);
+    this.event({ type: "file_waiting", id: file.id, reason: this.store.file(account, file.id).lastError ?? "paused" }); return true;
   }
 }

@@ -15,7 +15,9 @@ export type SessionCommand =
   | { kind: "submitText"; text: string } | { kind: "setOutputRoot"; path: string }
   | { kind: "setClipboardWatch"; enabled: boolean } | { kind: "setDownloadConnections"; count: number };
 export type CommandResult = { ok: true; ids: string[]; issues: string[] } | { ok: false; reason: string };
-export type SessionEngine = Pick<Engine, "step" | "resumeLocalPause" | "resumeTrafficPause" | "reconcile" | "blockPersistence" | "subscribe">;
+// stopActive / isPooled 对应下载池（add-concurrent-file-downloads）；只有串行执行器的测试替身可以不提供。
+export type SessionEngine = Pick<Engine, "step" | "resumeLocalPause" | "resumeTrafficPause" | "reconcile" | "blockPersistence" | "subscribe">
+  & Partial<Pick<Engine, "stopActive" | "isPooled">>;
 type Pending = { command: SessionCommand; resolve: (result: CommandResult) => void };
 
 // 与 config --output 相同的目录校验：存在、是目录、可写可进入。
@@ -60,7 +62,8 @@ export class RuntimeSession {
   async run(signal: AbortSignal): Promise<void> {
     const halt = new AbortController(); this.halt = halt;
     const combined = AbortSignal.any([signal, halt.signal]); this.running = combined;
-    const unsubscribe = this.engine.subscribe(event => { this.track(event); this.emit(event); });
+    // 下载池空出名额时唤醒空闲等待，下一个文件尽快开始。
+    const unsubscribe = this.engine.subscribe(event => { this.track(event); this.emit(event); if (event.type === "released") this.wake?.(); });
     const watching = this.watching();
     if (watching) this.startIntake();
     this.emit({ type: "started", ...(watching ? {} : { reason: "clipboard_off" }) });
@@ -79,7 +82,8 @@ export class RuntimeSession {
         if (!progressed && !this.pending.length) await this.idle(combined);
       }
     } finally {
-      halt.abort(); this.wake?.(); await this.stopIntake(); unsubscribe();
+      // 中断时下载池中的文件各自在安全点停止并保存检查点。
+      halt.abort(); this.wake?.(); await this.engine.stopActive?.().catch(() => {}); await this.stopIntake(); unsubscribe();
       this.stopped = true; this.running = null;
       for (const item of this.pending.splice(0)) item.resolve({ ok: false, reason: "stopped" });
       this.emit({ type: "stopped" });
@@ -87,7 +91,8 @@ export class RuntimeSession {
   }
 
   private track(event: RuntimeEvent): void {
-    if (!event.id) return;
+    // 下载池中文件的事件不代表串行步骤的当前项。
+    if (!event.id || this.engine.isPooled?.(event.id)) return;
     if (event.type === "scanning") this.active = { shareId: event.id };
     else if (event.type === "saving" || event.type === "downloading") {
       let shareId: string | undefined;
@@ -111,8 +116,11 @@ export class RuntimeSession {
     try {
       let result: CommandResult = { ok: true, ids: [], issues: [] };
       if (command.kind === "retry") this.store.retry(account, command.id);
-      else if (command.kind === "cancel") { this.store.cancel(account, command.id); this.store.recheckCancelledPause(account); }
-      else if (command.kind === "pauseQueue") this.store.setConfig("queue_paused", "1");
+      else if (command.kind === "cancel") {
+        // 只停止目标文件（或该分享的文件），其他在途文件继续。
+        await this.engine.stopActive?.(target => target.fileId === command.id || target.shareId === command.id);
+        this.store.cancel(account, command.id); this.store.recheckCancelledPause(account);
+      } else if (command.kind === "pauseQueue") { await this.engine.stopActive?.(); this.store.setConfig("queue_paused", "1"); }
       else if (command.kind === "resumeQueue") this.store.setConfig("queue_paused", "0");
       else if (command.kind === "setOutputRoot") {
         const root = await writableDirectory(command.path);

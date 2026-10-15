@@ -14,6 +14,7 @@ import type { Clipboard } from "../intake/clipboard";
 import { Engine, type RuntimeEvent } from "./engine";
 import { RuntimeSession, type SessionEngine } from "./session";
 import type { LocalFileSystem } from "../platform/files";
+import { AccountTier } from "../pikpak/tier";
 
 const labels: Record<string, string> = { scanning: "正在扫描", scanned: "扫描完成", scan_incomplete: "扫描未完整完成", scan_waiting: "扫描等待处理",
   saving: "正在准备转存", downloading: "正在下载", completed: "已完成", waiting_space: "等待云端空间", paused: "执行已暂停", attention: "需要核对", file_waiting: "文件等待处理" };
@@ -72,8 +73,10 @@ export async function prepareRuntime(store: Store, accountId: string, root: stri
   store.setConfig("output_root", root);
   if (store.paused(accountId)?.reason === "database") store.resume(accountId,
     { authenticated: true, permitted: true, writable: true, hasSpace: true, targetAvailable: true, trafficAvailable: true });
-  const drive = new Drive(new PikpakClient(manager, store), accountId);
-  const engine = new Engine(store, secrets, drive, filesystem, report);
+  const client = new PikpakClient(manager, store);
+  const drive = new Drive(client, accountId);
+  const tier = new AccountTier(client, accountId, store);
+  const engine = new Engine(store, secrets, drive, filesystem, report, undefined, undefined, { tier });
   return { session: new RuntimeSession(store, accountId, engine, new IntakeReceiver(store, secrets, accountId, root), systemClipboard()), drive };
 }
 
