@@ -8,9 +8,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rozx/Pikpack-downloader/releases/latest"><img src="https://img.shields.io/github/v/release/rozx/Pikpack-downloader?label=%E4%B8%8B%E8%BD%BD&color=5ccfe6" alt="最新版本"></a>
+  <a href="https://github.com/rozx/Pikpack-downloader/releases/latest"><img src="https://img.shields.io/github/v/release/rozx/Pikpack-downloader?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=5ccfe6" alt="最新版本"></a>
+  <a href="https://github.com/rozx/Pikpack-downloader/releases"><img src="https://img.shields.io/github/downloads/rozx/Pikpack-downloader/total?label=%E4%B8%8B%E8%BD%BD%E6%AC%A1%E6%95%B0&color=9ece6a" alt="下载次数"></a>
+  <a href="https://github.com/rozx/Pikpack-downloader/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/rozx/Pikpack-downloader/release.yml?label=%E5%8F%91%E5%B8%83%E6%9E%84%E5%BB%BA" alt="发布构建"></a>
+  <a href="https://github.com/rozx/Pikpack-downloader/stargazers"><img src="https://img.shields.io/github/stars/rozx/Pikpack-downloader?label=Stars&color=e0af68" alt="Stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/rozx/Pikpack-downloader?label=%E8%AE%B8%E5%8F%AF&color=bb9af7" alt="MIT 许可"></a>
+  <br>
   <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%20%7C%20macOS%20%7C%20Linux-5a8df0" alt="Windows、macOS 与 Linux">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/rozx/Pikpack-downloader?label=%E8%AE%B8%E5%8F%AF&color=9ece6a" alt="MIT 许可"></a>
+  <img src="https://img.shields.io/badge/Bun-1.4.2-f9f1e1?logo=bun&logoColor=black" alt="Bun 1.4.2">
+  <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript 严格模式">
+  <a href="https://github.com/rozx/Pikpack-downloader/commits/main"><img src="https://img.shields.io/github/last-commit/rozx/Pikpack-downloader/main?label=%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4" alt="最近提交"></a>
 </p>
 
 <p align="center">
