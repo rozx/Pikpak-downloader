@@ -7,6 +7,7 @@ import { explain, fileLook } from "./view-model";
 import { Keys, Rule, Title, boxHighlight, textHighlight } from "./parts";
 import type { Size } from "./main-panel";
 import { about } from "../about";
+import { DEFAULT_CONNECTIONS, MAX_CONNECTIONS } from "../download/connections";
 
 const copyStates: Record<string, string> = { retained: "保留中 · 交付完成后才可能被回收", deleting: "回收中", deleted: "已回收", protected: "受保护 · 不会自动回收" };
 export function DetailPage({ file, shareTitle, targetPath, userPaused, size, theme }: {
@@ -37,8 +38,9 @@ export function DetailPage({ file, shareTitle, targetPath, userPaused, size, the
   );
 }
 
-export function SettingsPage({ outputRoot, clipboardOn, selected, editing, draft, error, size, theme }: {
-  outputRoot: string | null; clipboardOn: boolean; selected: number; editing: boolean; draft: string; error: string | null; size: Size; theme: Theme;
+export const SETTINGS_ITEMS = 3;
+export function SettingsPage({ outputRoot, clipboardOn, connections, selected, editing, draft, error, size, theme }: {
+  outputRoot: string | null; clipboardOn: boolean; connections: number; selected: number; editing: boolean; draft: string; error: string | null; size: Size; theme: Theme;
 }) {
   const item = (index: number, label: string, value: (on: boolean) => React.ReactNode, note: string) => {
     const on = selected === index;
@@ -63,6 +65,12 @@ export function SettingsPage({ outputRoot, clipboardOn, selected, editing, draft
           : <Text {...theme.paint("strong", on)}>{truncateMiddle(outputRoot ?? "未设置", size.columns - 22)}</Text>,
           editing ? "输入或粘贴目录后按 Enter 保存，Esc 放弃" : "仅对新接收的分享生效，已有分享沿用原目录")}
         {item(1, "剪贴板监听", on => <Text {...theme.paint(clipboardOn ? "done" : "muted", on)}>{clipboardOn ? "● 开" : "○ 关"}</Text>, "关闭后只能用 a 粘贴分享文本")}
+        {item(2, "下载连接数", on => (
+          <Text>
+            <Text {...theme.paint(connections > 1 ? "key" : "muted", on)}>◀ </Text><Text {...theme.paint("strong", on)} bold>{connections}</Text>
+            <Text {...theme.paint(connections < MAX_CONNECTIONS ? "key" : "muted", on)}> ▶</Text>
+          </Text>
+        ), `单个文件同时使用的连接数，1–${MAX_CONNECTIONS}，默认 ${DEFAULT_CONNECTIONS}；从下一个文件开始生效`)}
         {error && <Text {...theme.paint("error")}>✗ {error}</Text>}
         <Box flexGrow={1} />
         <Box>
@@ -74,7 +82,8 @@ export function SettingsPage({ outputRoot, clipboardOn, selected, editing, draft
         </Box>
       </Box>
       <Rule width={size.columns - 2} theme={theme} />
-      <Keys items={editing ? [["Enter", "保存"], ["Esc", "放弃"]] : [["↑↓", "选择"], ["Enter", "修改"], ["Space", "切换"], ["Esc", "返回"]]} theme={theme} />
+      <Keys items={editing ? [["Enter", "保存"], ["Esc", "放弃"]] : selected === 2 ? [["↑↓", "选择"], ["←→", "调整"], ["Esc", "返回"]]
+        : [["↑↓", "选择"], ["Enter", "修改"], ["Space", "切换"], ["Esc", "返回"]]} theme={theme} />
     </Box>
   );
 }

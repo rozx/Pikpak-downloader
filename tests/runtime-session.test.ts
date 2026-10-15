@@ -216,3 +216,18 @@ test("关闭剪贴板监听后不再读取，重新开启后恢复", async () =>
     expect(clip.state.reads).toBe(reads); expect(clip.state.closes).toBeGreaterThan(0); expect(f.store.config("clipboard_watch")).toBe("0");
   } finally { abort.abort(); await running; await f.close(); }
 });
+
+test("设置下载连接数：合法值写入任务库，越界值被拒绝并保留原值", async () => {
+  const f = await storeFixture();
+  const session = new RuntimeSession(f.store, "account", fakeEngine(async () => { await Bun.sleep(5); return false; }).engine, f.receiver, fakeClipboard().clipboard);
+  const events: RuntimeEvent[] = []; session.subscribe(event => events.push(event));
+  const abort = new AbortController(); const running = session.run(abort.signal);
+  try {
+    expect((await session.command({ kind: "setDownloadConnections", count: 6 })).ok).toBe(true);
+    expect(f.store.config("download_connections")).toBe("6");
+    expect(events.some(event => event.type === "command" && event.reason === "setDownloadConnections")).toBe(true);
+    for (const count of [0, 9, 2.5]) expect(await session.command({ kind: "setDownloadConnections", count })).toEqual({ ok: false, reason: "invalid_input" });
+    expect(f.store.config("download_connections")).toBe("6");
+  } finally { abort.abort(); await running; await f.close(); }
+});
+

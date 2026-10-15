@@ -164,6 +164,7 @@ export function describeEvent(event: RuntimeEvent, names: NameLookup): LogLine |
       if (kind === "resumeQueue") return { icon: "▶", tone: "active", text: "队列已继续" };
       if (kind === "setOutputRoot") return { icon: "●", tone: "done", text: "下载目录已更新，只影响之后接收的分享" };
       if (kind === "setClipboardWatch") return { icon: "●", tone: "done", text: "剪贴板监听设置已更新" };
+      if (kind === "setDownloadConnections") return { icon: "●", tone: "done", text: "下载连接数已更新，从下一个文件开始生效" };
       return null;
     }
     case "command_failed": return { icon: "✗", tone: "error", text: `操作失败：${explain(event.reason ?? null).reason}` };

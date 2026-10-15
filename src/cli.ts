@@ -13,6 +13,7 @@ import { login } from "./auth/login";
 import { clipboardWorker } from "./intake/clipboard-worker";
 import { watch } from "./runtime/watch";
 import { interruptible } from "./runtime/lifecycle";
+import { configuredConnections, saveConnections } from "./download/connections";
 
 const help = `${about.name} ${about.version}（开发中）
 把 PikPak 云盘作为下载中转空间。作者 ${about.author} · ${about.homepage}
@@ -27,6 +28,8 @@ const help = `${about.name} ${about.version}（开发中）
   watch [--output <目录>] 前台监听剪贴板并处理下载队列
   status [任务ID]        只读查看任务状态
   config --output <目录> 设置新分享的默认目录
+  config --connections <1-8>
+                         设置单个文件的下载连接数（默认 4）
   retry <任务ID>         开启新的有限重试周期
   cancel <任务ID>        停止调度并保留资源
 
@@ -69,13 +72,13 @@ export async function runCli(args: string[]): Promise<void> {
         console.log(JSON.stringify({ id: file.id, state: file.state === "completed" ? "completed" : file.cancelled ? "cancelled" : file.state, retries: Number(file.retries), reason: file.lastError }));
       } else {
         const shares = args[1] ? [store.share(account, args[1])] : store.shares(account);
-        console.log(JSON.stringify({ paused: store.paused(account), tasks: shares.map(share => ({ id: share.id, ...store.summary(account, share.id) })) }, null, 2));
+        console.log(JSON.stringify({ paused: store.paused(account), connections: configuredConnections(store), tasks: shares.map(share => ({ id: share.id, ...store.summary(account, share.id) })) }, null, 2));
       }
     } finally { store.close(); }
     return;
   }
   if (["config", "retry", "cancel", "login", "logout", "watch"].includes(command!)) {
-    if (command === "config" ? args.length !== 3 || args[1] !== "--output" : ["retry", "cancel"].includes(command!) && args.length !== 2) throw new AppError("invalid_input");
+    if (command === "config" ? args.length !== 3 || !["--output", "--connections"].includes(args[1]!) : ["retry", "cancel"].includes(command!) && args.length !== 2) throw new AppError("invalid_input");
     if (command === "login" && (args.length > 2 || (args[1] && args[1] !== "--force"))) throw new AppError("invalid_input");
     if (command === "logout" && args.length !== 1) throw new AppError("invalid_input");
     if (command === "watch" && args.length !== 1 && !(args.length === 3 && args[1] === "--output")) throw new AppError("invalid_input");
@@ -102,7 +105,9 @@ export async function runCli(args: string[]): Promise<void> {
           }
           return;
         }
-        if (command === "config") {
+        if (command === "config" && args[1] === "--connections") {
+          console.log(`已保存下载连接数 ${saveConnections(store, args[2]!)}；从下一个文件开始生效。`);
+        } else if (command === "config") {
           const output = await realpath(resolve(args[2]!));
           if (!(await stat(output)).isDirectory()) throw new AppError("invalid_input");
           await access(output, constants.W_OK | constants.X_OK);

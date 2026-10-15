@@ -10,7 +10,7 @@ export type TuiSnapshot = {
   shares: ShareView[]; files: Record<string, FileView[]>;
   quota: { usage: bigint; limit: bigint } | null; localFree: bigint | null;
   clipboard: "on" | "off" | "unavailable"; userPaused: boolean; systemPause: Pause | null;
-  progress: Record<string, Progress>; events: LogEntry[]; outputRoot: string | null; stopping: boolean;
+  progress: Record<string, Progress>; events: LogEntry[]; outputRoot: string | null; stopping: boolean; connections: number;
 };
 export type PastePreview = { shares: number; paired: number; issues: string[] };
 export type OpenResult = { ok: true } | { ok: false; reason: string };

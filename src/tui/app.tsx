@@ -4,7 +4,8 @@ import type { TuiController } from "./controller";
 import { createTheme, type Theme } from "./theme";
 import { buildRows, explain, scrollOffset, type Row } from "./view-model";
 import { MainPanel, MIN_COLUMNS, MIN_ROWS, panelLayout, type Size } from "./main-panel";
-import { CONFIRM_LINES, ConfirmDialog, DetailPage, PASTE_BOX_LINES, PasteBox, SettingsPage } from "./pages";
+import { CONFIRM_LINES, ConfirmDialog, DetailPage, PASTE_BOX_LINES, PasteBox, SETTINGS_ITEMS, SettingsPage } from "./pages";
+import { MAX_CONNECTIONS } from "../download/connections";
 
 type Screen = { kind: "main" } | { kind: "detail"; fileId: string } | { kind: "settings" } | { kind: "paste" }
   | { kind: "confirm"; id: string; title: string; back: Screen } | { kind: "quit" };
@@ -130,9 +131,14 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
       return;
     }
     if (key.escape) setScreen({ kind: "main" });
-    else if (key.upArrow || key.downArrow) setSetting(value => ({ ...value, selected: 1 - value.selected, error: null }));
+    else if (key.upArrow || key.downArrow) setSetting(value => ({ ...value, selected: (value.selected + (key.downArrow ? 1 : SETTINGS_ITEMS - 1)) % SETTINGS_ITEMS, error: null }));
     else if (setting.selected === 0 && key.return) { setDraft(snapshot.outputRoot ?? ""); setSetting(value => ({ ...value, editing: true, error: null })); }
     else if (setting.selected === 1 && (key.return || input === " ")) void run({ kind: "setClipboardWatch", enabled: snapshot.clipboard === "off" });
+    else if (setting.selected === 2 && (key.leftArrow || key.rightArrow)) {
+      // 到达 1 或上限时不再发出命令。
+      const count = snapshot.connections + (key.rightArrow ? 1 : -1);
+      if (count >= 1 && count <= MAX_CONNECTIONS) void run({ kind: "setDownloadConnections", count });
+    }
   }, { isActive: screen.kind === "settings" });
 
   if (size.columns < MIN_COLUMNS || size.rows < MIN_ROWS) {
@@ -143,7 +149,7 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
     return <DetailPage file={detailFile} shareTitle={share?.title ?? detailFile.shareId} targetPath={controller.targetPath(detailFile.id)} userPaused={snapshot.userPaused} size={size} theme={theme} />;
   }
   if (screen.kind === "settings") {
-    return <SettingsPage outputRoot={snapshot.outputRoot} clipboardOn={snapshot.clipboard !== "off"} selected={setting.selected} editing={setting.editing}
+    return <SettingsPage outputRoot={snapshot.outputRoot} clipboardOn={snapshot.clipboard !== "off"} connections={snapshot.connections} selected={setting.selected} editing={setting.editing}
       draft={draft} error={setting.error} size={size} theme={theme} />;
   }
   const keys: Array<[string, string]> = screen.kind === "confirm" ? [["y", "确认"], ["n", "返回"]]

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { acquireQueueLock } from "../src/state/lock";
+import { Store } from "../src/state/store";
 
 test("前台主循环收到 SIGINT 后关闭监听并释放执行锁", async () => {
   const root = await mkdtemp(join(tmpdir(), "pikpak-watch-test-"));
@@ -37,3 +38,23 @@ test("干净状态缺登录时 watch 给出指引，配置与版本命令可独�
     expect((await run("status")).output).toContain("未设置活动账号");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("config --connections 校验 1–8 并在 status 中显示；监听占锁时拒绝写入", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pikpak-cli-test-"));
+  const run = async (...args: string[]) => {
+    const child = Bun.spawn([process.execPath, "src/cli.ts", ...args], { env: { ...process.env, PIKPAK_DOWNLOADER_STATE_DIR: root }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    return { output: await new Response(child.stdout).text(), error: await new Response(child.stderr).text(), code: await child.exited };
+  };
+  try {
+    const saved = await run("config", "--connections", "6"); expect(saved.code).toBe(0); expect(saved.output).toContain("6");
+    for (const bad of ["0", "-1", "4.5", "9"]) expect((await run("config", "--connections", bad)).code).toBe(1);
+    const store = new Store(join(root, "tasks.sqlite"));
+    try { expect(store.config("download_connections")).toBe("6"); store.ensureAccount("account"); store.setConfig("active_account", "account"); }
+    finally { store.close(); }
+    expect(JSON.parse((await run("status")).output)).toMatchObject({ connections: 6 });
+    const lock = acquireQueueLock(join(root, "queue-lock.sqlite"));
+    try { expect((await run("config", "--connections", "2")).code).toBe(1); } finally { lock.release(); }
+    expect(JSON.parse((await run("status")).output)).toMatchObject({ connections: 6 });
+  } finally { await rm(root, { recursive: true, force: true }); }
+}, 30000);
+

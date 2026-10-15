@@ -7,12 +7,13 @@ import type { ClipboardSnapshot } from "../platform/types";
 import type { IntakeReceiver, IntakeResult } from "../intake/receiver";
 import { pollClipboard, type Clipboard } from "../intake/clipboard";
 import type { Engine, RuntimeEvent } from "./engine";
+import { saveConnections } from "../download/connections";
 
 export type SessionCommand =
   | { kind: "retry"; id: string } | { kind: "cancel"; id: string }
   | { kind: "pauseQueue" } | { kind: "resumeQueue" }
   | { kind: "submitText"; text: string } | { kind: "setOutputRoot"; path: string }
-  | { kind: "setClipboardWatch"; enabled: boolean };
+  | { kind: "setClipboardWatch"; enabled: boolean } | { kind: "setDownloadConnections"; count: number };
 export type CommandResult = { ok: true; ids: string[]; issues: string[] } | { ok: false; reason: string };
 export type SessionEngine = Pick<Engine, "step" | "resumeLocalPause" | "resumeTrafficPause" | "reconcile" | "blockPersistence" | "subscribe">;
 type Pending = { command: SessionCommand; resolve: (result: CommandResult) => void };
@@ -116,7 +117,8 @@ export class RuntimeSession {
       else if (command.kind === "setOutputRoot") {
         const root = await writableDirectory(command.path);
         this.store.setConfig("output_root", root); this.receiver.setOutputRoot(root);
-      } else if (command.kind === "setClipboardWatch") {
+      } else if (command.kind === "setDownloadConnections") saveConnections(this.store, command.count);
+      else if (command.kind === "setClipboardWatch") {
         this.store.setConfig("clipboard_watch", command.enabled ? "1" : "0");
         if (!command.enabled) await this.stopIntake(); else if (this.running) this.startIntake();
       } else {

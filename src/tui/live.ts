@@ -7,6 +7,7 @@ import { describeEvent, type LogLine } from "./view-model";
 import { fileName } from "./format";
 import { SpeedMeter } from "./speed";
 import { openDirectory } from "./open-directory";
+import { configuredConnections } from "../download/connections";
 
 export type LiveOptions = {
   store: Store; accountId: string; session: Pick<RuntimeSession, "subscribe" | "command">;
@@ -119,7 +120,7 @@ export class LiveController implements TuiController {
     for (const [id, value] of this.progress) progress[id] = { ...value, rate: this.meter.rate(id), eta: this.meter.eta(id, value.size) };
     return { shares, files, quota: this.quota, localFree: this.localFree, clipboard: this.clipboard,
       userPaused: store.config("queue_paused") === "1", systemPause: store.paused(accountId), progress, events: [...this.events],
-      outputRoot: store.config("output_root"), stopping: this.stopping };
+      outputRoot: store.config("output_root"), stopping: this.stopping, connections: configuredConnections(store) };
   }
   // 重建快照后合并通知，界面重绘频率不超过每 flushMs 一次。
   private refresh(): void {

@@ -30,7 +30,7 @@ export function mockSnapshot(): TuiSnapshot {
     events: [{ at: Date.parse("2026-10-14T22:31:07"), icon: "⟳", tone: "scan", text: "「某某合集」扫描完成：3 个文件" },
       { at: Date.parse("2026-10-14T22:32:12"), icon: "✗", tone: "error", text: "part1.mp4 下载失败" },
       { at: Date.parse("2026-10-14T22:33:40"), icon: "✓", tone: "done", text: "episode01.mkv 校验通过，已完成" }],
-    outputRoot: "C:\\Users\\demo\\Downloads\\PikPak-Test", stopping: false,
+    outputRoot: "C:\\Users\\demo\\Downloads\\PikPak-Test", stopping: false, connections: 4,
   };
 }
 

@@ -31,7 +31,7 @@ test("快照来自任务库只读视图，包含暂停、目录与剪贴板状�
     const snapshot = f.live.snapshot();
     expect(snapshot.shares.map(share => share.title)).toEqual(["某某合集"]);
     expect(snapshot.files[f.share.id]!.map(file => file.id)).toEqual([f.file.id]);
-    expect(snapshot).toMatchObject({ userPaused: true, systemPause: { reason: "authentication" }, outputRoot: f.root, clipboard: "on", quota: { usage: 10n, limit: 100n }, localFree: 5000n });
+    expect(snapshot).toMatchObject({ userPaused: true, systemPause: { reason: "authentication" }, outputRoot: f.root, clipboard: "on", quota: { usage: 10n, limit: 100n }, localFree: 5000n, connections: 4 });
   } finally { await f.close(); }
 });
 

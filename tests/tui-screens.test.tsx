@@ -230,3 +230,21 @@ test("正在执行的文件显示动态图标；暂停或系统暂停时恢复�
   expect(icon()).toBe("↓");
 });
 
+test("设置页调整下载连接数：显示当前值，←→ 发出命令，到达 1 或 8 后不再越界", async () => {
+  const controller = new FakeController();
+  const { frame, press } = mount(controller); await settle();
+  await press("s");
+  expect(frame()).toContain("下载连接数"); expect(frame()).toContain("◀ 4 ▶"); expect(frame()).toContain("默认 4");
+  await press(keys.down, keys.down);
+  expect(frame()).toContain("←→ 调整");
+  await press(keys.right, keys.left);
+  expect(controller.commands).toEqual([{ kind: "setDownloadConnections", count: 5 }, { kind: "setDownloadConnections", count: 3 }]);
+  controller.update({ connections: 8 }); await settle();
+  expect(frame()).toContain("◀ 8 ▶");
+  await press(keys.right); expect(controller.commands).toHaveLength(2);
+  controller.update({ connections: 1 }); await settle();
+  await press(keys.left); expect(controller.commands).toHaveLength(2);
+  await press(keys.up); expect(frame()).toContain("Enter 修改"); expect(frame()).not.toContain("←→ 调整");
+  await press(keys.up, keys.up); expect(frame()).toContain("←→ 调整");
+});
+

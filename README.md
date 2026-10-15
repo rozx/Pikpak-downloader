@@ -33,7 +33,7 @@ macOS 原生构建需要 Xcode Command Line Tools 和 Node-API 头文件；可�
 | ↑↓ / ←→ / Enter | 选择、折叠或展开分享、查看文件详情 |
 | r / c | 重试；取消（需确认，保留本地文件、断点和云端副本） |
 | p | 暂停或继续整个队列（重启后保持） |
-| o / a / s | 打开下载目录；粘贴分享文本；设置下载目录与剪贴板监听 |
+| o / a / s | 打开下载目录；粘贴分享文本；设置下载目录、剪贴板监听与下载连接数 |
 | q / Ctrl+C | 退出确认：y 或再按 Ctrl+C 停止并保存进度，n / Esc 返回；停止期间再按 Ctrl+C 立即退出 |
 
 窗口至少需要 60×15；设置 `NO_COLOR` 可关闭颜色。输出被重定向或在脚本中运行时不会进入界面，可以使用下面的子命令。
@@ -52,6 +52,7 @@ macOS 原生构建需要 Xcode Command Line Tools 和 Node-API 头文件；可�
 ./dist/pikpak-downloader-darwin-arm64 retry <任务ID>
 ./dist/pikpak-downloader-darwin-arm64 cancel <任务ID>
 ./dist/pikpak-downloader-darwin-arm64 config --output "$HOME/Downloads"
+./dist/pikpak-downloader-darwin-arm64 config --connections 6
 ./dist/pikpak-downloader-darwin-arm64 logout
 ```
 
