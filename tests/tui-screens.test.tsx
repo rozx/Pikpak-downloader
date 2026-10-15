@@ -446,18 +446,16 @@ test("设置页账号摘要；账号页显示账号、会员、容量与权限�
   await press(keys.escape, keys.escape); expect(frame()).toContain("同时下载文件数");
 });
 
-test("账号页标出探测到缺少的必须权限；探测中、无法判断或资料未读取时如实说明", async () => {
+test("账号页标出缺少的必须权限；授权范围未知或资料未读取时如实说明", async () => {
   const controller = new FakeController();
   const { frame, press } = mount(controller); await settle();
-  controller.update({ account: { ...mockSnapshot().account!, permissions: { account: "granted", "files:manage": "missing", share: "granted", cloud_download: "missing" } } }); await settle();
+  controller.update({ account: { ...mockSnapshot().account!, scopes: ["account", "share"] } }); await settle();
   await press("s");
   expect(frame()).toContain("权限 缺少 管理文件");
   await press(keys.enter);
   expect(frame()).toContain("✗ 管理文件"); expect(frame()).toContain("✗ 云下载"); expect(frame()).toContain("缺少必须的权限：管理文件。按 r 重新授权");
-  controller.update({ account: { ...mockSnapshot().account!, permissions: null, membership: null } }); await settle();
-  expect(frame()).toContain("? 管理文件"); expect(frame()).toContain("正在探测权限…"); expect(frame()).toContain("暂不可用");
-  controller.update({ account: { ...mockSnapshot().account!, permissions: { account: "granted", "files:manage": "unknown", share: "granted" } } }); await settle();
-  expect(frame()).toContain("部分权限暂时无法探测");
+  controller.update({ account: { ...mockSnapshot().account!, scopes: null, membership: null } }); await settle();
+  expect(frame()).toContain("? 管理文件"); expect(frame()).toContain("无法确认授权页的勾选结果"); expect(frame()).toContain("暂不可用");
   controller.update({ account: null, quota: null }); await settle();
   expect(frame()).toContain("正在读取…"); expect(frame()).toContain("暂不可用");
 });

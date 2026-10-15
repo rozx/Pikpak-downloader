@@ -2,8 +2,7 @@ import { randomUUID } from "node:crypto";
 import { AppError } from "../errors";
 import { authorizationUrl, exchange, newAttempt, takeAuthorizationCode, type Transport } from "../pikpak/protocol";
 import type { SessionManager } from "./session";
-import { grantedScopes, missingPermissions, permissionNames, permissionStates } from "./permissions";
-import { probePermissions, probeStates } from "../pikpak/permission-probe";
+import { grantedScopes, missingPermissions, permissionNames } from "./permissions";
 import { failurePage, insufficientPage, landingPage, successPage } from "./login-page";
 
 async function openBrowser(url: string): Promise<void> {
@@ -15,7 +14,7 @@ async function openBrowser(url: string): Promise<void> {
 }
 
 export type LoginOptions = { signal?: AbortSignal; openBrowser?: (url: string) => Promise<void>; http?: Transport };
-export type LoginSession = Pick<SessionManager, "existingLogin" | "client" | "accept"> & Partial<Pick<SessionManager, "permissions">>;
+export type LoginSession = Pick<SessionManager, "existingLogin" | "client" | "accept"> & Partial<Pick<SessionManager, "scopes">>;
 // signal 取消时立即结束等待并关闭本地回调服务。
 export async function login(session: LoginSession, force = false, announce = console.log,
   options: LoginOptions = {}): Promise<string> {
@@ -23,7 +22,7 @@ export async function login(session: LoginSession, force = false, announce = con
     try {
       const existing = await session.existingLogin();
       // 已保存的授权缺少必需权限时不复用，改走浏览器授权（improve-account-login 决策 3）。
-      if (existing && !missingPermissions(await session.permissions?.() ?? {}).length) return existing;
+      if (existing && !missingPermissions(await session.scopes?.() ?? null).length) return existing;
     } catch { /* 明确的 login 命令允许重新授权，旧任务仍保留。 */ }
   }
   const client = await session.client();
@@ -56,8 +55,8 @@ export async function login(session: LoginSession, force = false, announce = con
       callbackRunning = true;
       try {
         const tokens = await exchange(client, code, attempt.verifier, options.http);
-        // 保存前实际探测每项权限：缺少必需权限时不保存，保留原会话并继续等待重新授权。
-        const missing = missingPermissions(permissionStates(probeStates(await probePermissions(tokens.accessToken, options.http)), grantedScopes(tokens)));
+        // 保存前核对授权范围：缺少必需权限时不保存，保留原会话并继续等待重新授权。
+        const missing = missingPermissions(grantedScopes(tokens));
         if (missing.length) {
           callbackRunning = false;
           announce(`授权缺少必须的权限：${permissionNames(missing)}。请在浏览器页面点击“重新授权”并勾选全部权限。`);

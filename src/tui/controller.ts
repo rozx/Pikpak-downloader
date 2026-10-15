@@ -5,7 +5,6 @@ import type { ReleasePreview } from "../runtime/engine";
 import { parseShares } from "../intake/parse";
 import type { LogLine } from "./view-model";
 import type { Membership, Tier } from "../pikpak/tier";
-import type { PermissionStates } from "../auth/permissions";
 
 export type Progress = { bytes: bigint; size: bigint; rate: number | null; eta: number | null };
 export type LogEntry = LogLine & { at: number };
@@ -24,8 +23,7 @@ export type TuiSnapshot = {
   account: AccountView | null;
 };
 // 账号页的资料（improve-account-login 决策 5）：读不到的部分为 null。
-// permissions：实际探测得到的各项权限状态，尚未探测或探测失败时为 null。
-export type AccountView = { id: string; name: string | null; email: string | null; scopes: string[] | null; permissions: PermissionStates | null; membership: Membership | null };
+export type AccountView = { id: string; name: string | null; email: string | null; scopes: string[] | null; membership: Membership | null };
 export type PastePreview = { shares: number; paired: number; issues: string[] };
 export type OpenResult = { ok: true } | { ok: false; reason: string };
 

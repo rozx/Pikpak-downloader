@@ -120,19 +120,6 @@ test("会话记录保存授权范围，刷新响应不带范围时沿用；账�
   await manager.logout(); expect(await manager.scopes()).toBe(null);
 });
 
-test("权限以当前会话实际探测为准，探测拒绝不暂停账号；没有会话时为 null", async () => {
-  const secrets = new Secrets(); const { http: base } = provider(); const failures: string[] = [];
-  await secrets.set("openid-client.v1", JSON.stringify(client));
-  const http: Transport = async (url, init) => url.includes("api-drive.mypikpak.com") && !url.endsWith("/about")
-    ? url.includes("/share?") ? Response.json({ error: "permission_denied" }, { status: 403 }) : Response.json({ error: "file_not_found" }, { status: 404 })
-    : base(url, init);
-  const manager = new SessionManager(secrets, http, account => failures.push(account));
-  expect(await manager.permissions()).toBe(null);
-  await manager.accept({ accessToken: "old-access", refreshToken: "old-refresh", expiresIn: 3600, scope: ["openid", "profile"] }, client);
-  expect(await manager.permissions()).toEqual({ account: "granted", "files:manage": "granted", share: "missing", cloud_download: "granted" });
-  expect(failures).toEqual([]); expect(await manager.access("account")).toBe("old-access");
-});
-
 test("账号不匹配阻止写入，权限拒绝暂停且不盲目重发写请求", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pikpak-auth-test-")); const store = new Store(join(dir, "db.sqlite"));
   try {

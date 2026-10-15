@@ -1,14 +1,13 @@
 import { expect, test } from "bun:test";
-import { grantedScopes, jwtScopes, missingPermissions, parseScopes, permissionNames, permissionRows, permissionStates, permissionsUnknown } from "../src/auth/permissions";
+import { grantedScopes, jwtScopes, missingPermissions, parseScopes, permissionNames, permissionRows } from "../src/auth/permissions";
 import { login } from "../src/auth/login";
 import { landingPage } from "../src/auth/login-page";
-import { ProviderError, type Client, type Tokens, type Transport } from "../src/pikpak/protocol";
-import { PROBES, classifyProbe, probePermissions, probeStates } from "../src/pikpak/permission-probe";
+import type { Client, Tokens, Transport } from "../src/pikpak/protocol";
 import { rejection } from "./fixtures/rejection";
 
 const jwt = (payload: Record<string, unknown>) => `e30.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.synthetic-signature`;
 
-test("授权范围：解析空格分隔或数组，JWT 载荷与响应合并", () => {
+test("授权范围：解析空格分隔或数组，JWT 载荷作为后备，未知时不判定缺少", () => {
   expect(parseScopes("files:manage  cloud_download share account")).toEqual(["files:manage", "cloud_download", "share", "account"]);
   expect(parseScopes(["account", "share", "account"])).toEqual(["account", "share"]);
   expect(parseScopes(42)).toBe(null); expect(parseScopes([1])).toBe(null);
@@ -18,48 +17,30 @@ test("授权范围：解析空格分隔或数组，JWT 载荷与响应合并", (
   expect(grantedScopes({ accessToken: jwt({ scope: "account" }), scope: ["share"] })).toEqual(["share", "account"]);
   expect(grantedScopes({ accessToken: "opaque-token", scope: ["openid", "profile"] })).toEqual(["openid", "profile"]);
   expect(grantedScopes({ accessToken: "opaque-token" })).toBe(null);
+  expect(grantedScopes({ accessToken: jwt({ scope: "account" }) })).toEqual(["account"]);
+  expect(missingPermissions(null)).toEqual([]);
+  expect(permissionNames(missingPermissions(["account", "cloud_download"]))).toBe("管理文件、分享");
+  expect(missingPermissions(["account", "files:manage", "share"])).toEqual([]);
 });
 
-test("探测分类：403 或权限类错误为缺少；其他 4xx 说明已通过权限检查；401、5xx、限流与网络错误无法判断", () => {
-  expect(classifyProbe(null)).toBe("granted");
-  expect(classifyProbe(new ProviderError("permission", "permission_denied", 403))).toBe("missing");
-  expect(classifyProbe(new ProviderError("permission", "insufficient_scope", 400))).toBe("missing");
-  for (const status of [400, 404]) expect(classifyProbe(new ProviderError("permission", "provider-error", status))).toBe("granted");
-  for (const status of [401, 429, 500, undefined]) expect(classifyProbe(new ProviderError("permission", "provider-error", status))).toBe("unknown");
-  expect(classifyProbe(Error("other"))).toBe("unknown");
-  expect(probeStates([{ permission: "files:manage", label: "读", status: 404, reason: null, state: "granted" }, { permission: "files:manage", label: "写", status: 403, reason: null, state: "missing" }]))
-    .toEqual({ "files:manage": "missing" });
-  expect(probeStates([{ permission: "share", label: "读", status: 404, reason: null, state: "granted" }, { permission: "share", label: "写", status: 500, reason: null, state: "unknown" }]))
-    .toEqual({ share: "unknown" });
+test("实测回归：漏勾“管理文件”时服务端返回的范围准确反映勾选结果；逗号或加号分隔同样解析", () => {
+  expect(permissionNames(missingPermissions(parseScopes("cloud_download share account")))).toBe("管理文件");
+  expect(missingPermissions(parseScopes("files:manage cloud_download share account"))).toEqual([]);
+  expect(parseScopes("files:manage,cloud_download, share+account")).toEqual(["files:manage", "cloud_download", "share", "account"]);
 });
 
-test("探测请求都没有副作用：只读，或针对不存在 ID 的空请求体写入；令牌只出现在授权头", async () => {
-  const seen: Array<{ url: string; method: string; body: unknown; auth: string | null }> = [];
-  const http: Transport = async (url, init) => {
-    seen.push({ url, method: init.method ?? "GET", body: init.body, auth: new Headers(init.headers).get("authorization") });
-    return Response.json({ error: "file_not_found" }, { status: 404 });
-  };
-  const results = await probePermissions("synthetic-access", http);
-  expect(results.map(result => result.state)).toEqual(PROBES.map(() => "granted"));
-  expect(seen).toHaveLength(PROBES.length);
-  for (const request of seen) {
-    expect(request.url.startsWith("https://api-drive.mypikpak.com/drive/v1/")).toBe(true); expect(request.url).not.toContain("synthetic-access");
-    expect(request.auth).toBe("Bearer synthetic-access");
-    if (request.method !== "GET") { expect(request.method).toBe("PATCH"); expect(request.body).toBe("{}"); expect(request.url).toContain("pikpak-downloader-permission-probe"); }
+test("实测回归：服务端只回显登录基础范围时视为未知，不判定缺少权限", () => {
+  for (const scopes of [["openid", "profile"], ["openid", "profile", "email"], ["user:extra"]]) {
+    expect(missingPermissions(scopes)).toEqual([]);
+    expect(permissionRows(scopes).filter(row => row.scope !== "user:extra").every(row => row.state === "unknown")).toBe(true);
   }
+  expect(permissionRows(["openid", "user:extra"]).at(-1)).toMatchObject({ scope: "user:extra", state: "granted" });
 });
 
-test("权限状态：探测结果优先，无法判断时才参考含应用权限的授权范围；只回显基础范围时无法确认", () => {
-  const states = permissionStates({ account: "granted", "files:manage": "missing", share: "unknown" }, ["share"]);
-  expect(states).toEqual({ account: "granted", "files:manage": "missing", share: "granted", cloud_download: "missing" });
-  expect(permissionNames(missingPermissions(states))).toBe("管理文件");
-  for (const scopes of [null, ["openid", "profile"]]) {
-    const unknown = permissionStates(null, scopes);
-    expect(missingPermissions(unknown)).toEqual([]); expect(permissionsUnknown(unknown)).toBe(true);
-  }
-  expect(permissionsUnknown(permissionStates({ account: "granted", "files:manage": "granted", share: "granted" }, null))).toBe(false);
-  const rows = permissionRows(states, ["openid", "user:extra"]);
+test("权限行：已知权限按顺序列出状态，登录基础范围不显示，其他范围附在末尾", () => {
+  const rows = permissionRows(["openid", "account", "share", "user:extra"]);
   expect(rows.map(row => [row.scope, row.state])).toEqual([["account", "granted"], ["files:manage", "missing"], ["share", "granted"], ["cloud_download", "missing"], ["user:extra", "granted"]]);
+  expect(permissionRows(null).every(row => row.state === "unknown")).toBe(true);
 });
 
 test("本地入口页列出必须与建议勾选的权限，转义链接，不加载脚本或外部资源", () => {
@@ -68,22 +49,15 @@ test("本地入口页列出必须与建议勾选的权限，转义链接，不�
   expect(html).not.toMatch(/<script|<link|https?:\/\/(?!github)/);
 });
 
-// 假服务：令牌接口只回显基础范围；每轮授权拒绝该轮 denied 中权限的探测，其余探测按“不存在”回应。
-function flow(rounds: Array<ReadonlySet<string>>) {
+function flow(scopes: Array<string | undefined>) {
   const port = 54000 + Math.floor(Math.random() * 900);
   const client: Client = { clientId: "client", clientSecret: "secret", redirectUri: `http://127.0.0.1:${port}/callback`, authMethod: "client_secret_post" };
   const accepted: Tokens[] = []; let exchanges = 0;
-  const http: Transport = async (url, init) => {
-    if (url.endsWith("/auth/token")) {
-      exchanges++;
-      return Response.json({ access_token: "synthetic-access", refresh_token: "synthetic-refresh", expires_in: 3600, token_type: "Bearer", scope: "openid profile" });
-    }
-    const path = url.replace("https://api-drive.mypikpak.com", "");
-    const probe = PROBES.find(item => item.path === path && (item.init?.method ?? "GET") === (init.method ?? "GET"))!;
-    const denied = rounds[Math.min(exchanges, rounds.length) - 1]!;
-    return denied.has(probe.permission) ? Response.json({ error: "permission_denied" }, { status: 403 }) : Response.json({ error: "file_not_found" }, { status: 404 });
+  const http: Transport = async () => {
+    const scope = scopes[Math.min(exchanges++, scopes.length - 1)];
+    return Response.json({ access_token: "synthetic-access", refresh_token: "synthetic-refresh", expires_in: 3600, token_type: "Bearer", ...scope === undefined ? {} : { scope } });
   };
-  const session = { existingLogin: async () => null as string | null,
+  const session = { existingLogin: async () => null as string | null, scopes: async () => null as string[] | null,
     accept: async (tokens: Tokens) => { accepted.push(tokens); return "account"; }, client: async () => client };
   const base = `http://127.0.0.1:${port}`;
   const authorize = async () => {
@@ -95,8 +69,8 @@ function flow(rounds: Array<ReadonlySet<string>>) {
   return { client, session, http, accepted, authorize, callback };
 }
 
-test("实测探测到缺少必须的权限：不保存，结果页列出缺少项并可重新授权；补齐后登录完成", async () => {
-  const f = flow([new Set(["files:manage"]), new Set()]);
+test("授权缺少必须的权限：不保存，结果页列出缺少项并可重新授权；补齐后登录完成", async () => {
+  const f = flow(["cloud_download share account", "files:manage cloud_download share account"]);
   const announced: string[] = [];
   const pending = login(f.session, true, message => { announced.push(message); }, { openBrowser: async () => {}, http: f.http });
   await Bun.sleep(50);
@@ -113,23 +87,25 @@ test("实测探测到缺少必须的权限：不保存，结果页列出缺少�
   expect(await f.callback(first, "synthetic-code-2")).toContain("授权未完成");
   expect(await f.callback(second, "synthetic-code-3")).toContain("登录完成");
   expect(await pending).toBe("account");
-  expect(f.accepted).toHaveLength(1);
+  expect(f.accepted).toHaveLength(1); expect(f.accepted[0]!.scope).toEqual(["files:manage", "cloud_download", "share", "account"]);
 });
 
-test("实测回归：授权范围只回显 openid profile 而探测全部通过时登录完成", async () => {
-  const f = flow([new Set()]);
-  const pending = login(f.session, true, () => {}, { openBrowser: async () => {}, http: f.http });
-  await Bun.sleep(50);
-  expect(await f.callback(await f.authorize(), "synthetic-code")).toContain("登录完成");
-  expect(await pending).toBe("account"); expect(f.accepted[0]!.scope).toEqual(["openid", "profile"]);
+test("服务端未返回授权范围，或只回显登录基础范围时，照常保存", async () => {
+  for (const scope of [undefined, "openid profile"]) {
+    const f = flow([scope]);
+    const pending = login(f.session, true, () => {}, { openBrowser: async () => {}, http: f.http });
+    await Bun.sleep(50);
+    expect(await f.callback(await f.authorize(), "synthetic-code")).toContain("登录完成");
+    expect(await pending).toBe("account"); expect(f.accepted[0]!.scope).toEqual(scope ? ["openid", "profile"] : undefined);
+  }
 });
 
-test("非强制登录：已有会话探测到缺少必须的权限时不复用，改走浏览器授权", async () => {
-  const f = flow([new Set()]);
-  const reused = await login({ ...f.session, existingLogin: async () => "account", permissions: async () => ({ account: "granted", "files:manage": "unknown" }) }, false, () => {});
+test("非强制登录：已有会话缺少必须的权限时不复用，改走浏览器授权", async () => {
+  const f = flow(["account"]);
+  const reused = await login({ ...f.session, existingLogin: async () => "account", scopes: async () => ["account", "files:manage", "share"] }, false, () => {});
   expect(reused).toBe("account");
   const controller = new AbortController(); const announced: string[] = [];
-  const pending = login({ ...f.session, existingLogin: async () => "account", permissions: async () => ({ share: "missing" }) }, false, message => { announced.push(message); },
+  const pending = login({ ...f.session, existingLogin: async () => "account", scopes: async () => ["account"] }, false, message => { announced.push(message); },
     { signal: controller.signal, openBrowser: async () => {}, http: f.http });
   await Bun.sleep(50);
   expect(announced[0]).toContain("请在浏览器完成登录");
