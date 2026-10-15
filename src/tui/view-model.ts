@@ -91,10 +91,22 @@ export function fileLook(file: FileView, options: { userPaused: boolean; sharePa
   return look;
 }
 
-export type ShareCounts = { total: number; completed: number; downloading: number; transferring: number; queued: number; paused: number; failed: number; waiting: number; cancelled: number };
-export function shareCounts(files: FileView[], userPaused: boolean, sharePaused = false): ShareCounts {
-  const counts: ShareCounts = { total: files.length, completed: 0, downloading: 0, transferring: 0, queued: 0, paused: 0, failed: 0, waiting: 0, cancelled: 0 };
+// 任务位置（add-task-controls 决策 6）：本地格为已完成且文件存在、已完成但文件已不存在、未完成但有断点数据，或没有本地数据；
+// 云端格表示最近一份副本仍在云盘中（保留中、删除中或受保护）。
+export type Location = { local: "full" | "missing" | "partial" | null; cloud: boolean };
+export function fileLocation(file: FileView, missing = false): Location {
+  const local = file.state === "completed" ? (missing ? "missing" : "full") : file.checkpoint > 0n ? "partial" : null;
+  return { local, cloud: file.copyState !== null && file.copyState !== "deleted" };
+}
+
+export type ShareCounts = { total: number; completed: number; downloading: number; transferring: number; queued: number; paused: number; failed: number; waiting: number; cancelled: number;
+  cloud: number; missing: number };
+export function shareCounts(files: FileView[], userPaused: boolean, sharePaused = false, missing: ReadonlySet<string> = new Set()): ShareCounts {
+  const counts: ShareCounts = { total: files.length, completed: 0, downloading: 0, transferring: 0, queued: 0, paused: 0, failed: 0, waiting: 0, cancelled: 0, cloud: 0, missing: 0 };
   for (const file of files) {
+    const location = fileLocation(file, missing.has(file.id));
+    if (location.cloud) counts.cloud++;
+    if (location.local === "missing") counts.missing++;
     if (file.state === "completed") counts.completed++;
     else if (file.cancelled) counts.cancelled++;
     else if (file.paused || sharePaused) counts.paused++;
@@ -110,17 +122,19 @@ export function shareCounts(files: FileView[], userPaused: boolean, sharePaused 
 }
 
 export type Row = { kind: "share"; key: string; share: ShareView; counts: ShareCounts; expanded: boolean }
-  | { kind: "file"; key: string; shareId: string; file: FileView; name: string; path: string; look: Look };
+  | { kind: "file"; key: string; shareId: string; file: FileView; name: string; path: string; look: Look; location: Location };
 // 未完成的分享默认展开，全部完成的默认折叠；用户的折叠选择优先。
-export function buildRows(input: { shares: ShareView[]; files: Record<string, FileView[]>; expanded: Record<string, boolean | undefined>; userPaused: boolean }): Row[] {
+export function buildRows(input: { shares: ShareView[]; files: Record<string, FileView[]>; expanded: Record<string, boolean | undefined>; userPaused: boolean;
+  missing?: ReadonlySet<string> }): Row[] {
+  const missing = input.missing ?? new Set<string>();
   const rows: Row[] = [];
   for (const share of input.shares) {
     const files = input.files[share.id] ?? [];
     const expanded = input.expanded[share.id] ?? share.summary.status !== "completed";
-    rows.push({ kind: "share", key: `s:${share.id}`, share, counts: shareCounts(files, input.userPaused, share.paused), expanded });
+    rows.push({ kind: "share", key: `s:${share.id}`, share, counts: shareCounts(files, input.userPaused, share.paused, missing), expanded });
     if (expanded) for (const file of files) {
       rows.push({ kind: "file", key: `f:${file.id}`, shareId: share.id, file, name: fileName(file.relativePath), path: displayPath(file.relativePath),
-        look: fileLook(file, { userPaused: input.userPaused, sharePaused: share.paused }) });
+        look: fileLook(file, { userPaused: input.userPaused, sharePaused: share.paused }), location: fileLocation(file, missing.has(file.id)) });
     }
   }
   return rows;
@@ -163,8 +177,11 @@ export function describeEvent(event: RuntimeEvent, names: NameLookup): LogLine |
     case "paused": return { icon: "⏸", tone: "warning", text: `执行已暂停：${pauses[event.reason as PauseReason]?.reason ?? explain(event.reason ?? null).reason}` };
     case "attention": return { icon: "✗", tone: "error", text: `${file(event.id)} 需要核对：${explain(event.reason ?? null).reason}` };
     case "file_waiting": return { icon: "!", tone: "warning", text: `${file(event.id)}：${explain(event.reason ?? null).reason}` };
-    case "copy_released": return { icon: "♻", tone: "done", text: `${file(event.id)} 的云端副本已释放${event.bytes ? `（${formatBytes(event.bytes)}）` : ""}` };
-    case "copy_missing": return { icon: "♻", tone: "muted", text: `${file(event.id)} 的云端副本已不在云盘中，记录已更新` };
+    case "copy_released": return { icon: "♻", tone: "done",
+      text: `${file(event.id)} 的云端副本已释放${event.bytes ? `（${formatBytes(event.bytes)}）` : ""}${event.reason === "removed" ? "，任务记录已删除" : ""}` };
+    case "copy_missing": return { icon: "♻", tone: "muted", text: `${file(event.id)} 的云端副本已不在云盘中，${event.reason === "removed" ? "任务记录已删除" : "记录已更新"}` };
+    case "task_removed": return { icon: "♻", tone: "muted", text: `${file(event.id)} 的任务记录已删除，本地文件保留` };
+    case "share_removed": return { icon: "♻", tone: "muted", text: `分享${share(event.id)}的任务都已删除，已从列表移除` };
     case "copy_release_skipped": return { icon: "!", tone: "warning", text: `${file(event.id)} 的云端副本未释放：${explain(event.reason ?? null).reason}` };
     case "copy_release_denied": return { icon: "✗", tone: "error", text: `${file(event.id)} 的云端副本未能释放：${explain("release_denied").reason}${event.reason && /^[a-z0-9_-]{1,64}$/i.test(event.reason) ? `（${event.reason}）` : ""}` };
     case "copy_release_failed": return { icon: "✗", tone: "error", text: `${file(event.id)} 的云端副本释放失败：${explain(event.reason ?? null).reason}` };

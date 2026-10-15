@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { fileStates, type FileState } from "../src/state/model";
 import type { FileView, ShareView } from "../src/state/store";
-import { buildRows, describeEvent, explain, fileLook, knownReasons, pauseExplanation, scrollOffset, shareCounts } from "../src/tui/view-model";
+import { buildRows, describeEvent, explain, fileLocation, fileLook, knownReasons, pauseExplanation, scrollOffset, shareCounts } from "../src/tui/view-model";
 
 const summary = (status: string, total: number, completed: number) => ({ status, total, completed, cancelled: 0, failed: 0, waiting: 0, active: total - completed, reason: null });
 const share = (id: string, status: string, total: number, completed: number): ShareView =>
@@ -85,4 +85,25 @@ test("释放云端副本的事件描述：已释放、已不存在、未释放�
   expect(describeEvent({ type: "copy_release_failed", id: "f_1", reason: "rate_limited" }, names)?.text).toBe("episode01.mkv 的云端副本释放失败：请求过于频繁，PikPak 暂时限流");
   expect(describeEvent({ type: "command", reason: "releaseCopy", id: "s_1", count: 2 }, names)?.text).toBe("正在释放 分享「某某合集」 的 2 个云端副本");
   for (const reason of ["copy_absent", "copy_in_use", "copy_not_owned", "copy_changed", "release_denied"]) expect(explain(reason).reason).not.toContain("未知原因");
+});
+
+test("任务位置：已完成看本地文件是否仍在，未完成看断点；云端看最近一份副本；分享计数", () => {
+  const done = file("a", "completed"), partial = file("b", "downloading", { checkpoint: 10n, copyState: "retained" }), fresh = file("c", "ready");
+  expect(fileLocation(done)).toEqual({ local: "full", cloud: false });
+  expect(fileLocation(done, true)).toEqual({ local: "missing", cloud: false });
+  expect(fileLocation(partial)).toEqual({ local: "partial", cloud: true });
+  expect(fileLocation(fresh)).toEqual({ local: null, cloud: false });
+  for (const state of ["retained", "deleting", "protected"] as const) expect(fileLocation({ ...done, copyState: state }).cloud).toBe(true);
+  expect(fileLocation({ ...done, copyState: "deleted" }).cloud).toBe(false);
+  expect(shareCounts([done, partial, fresh, { ...done, id: "d", copyState: "retained" }], false, false, new Set(["a"]))).toMatchObject({ cloud: 2, missing: 1 });
+  const rows = buildRows({ shares: [share("s_1", "partial", 2, 1)], files: { s_1: [done, partial] }, expanded: {}, userPaused: false, missing: new Set(["a"]) });
+  expect(rows.flatMap(row => row.kind === "file" ? [row.location] : [])).toEqual([{ local: "missing", cloud: false }, { local: "partial", cloud: true }]);
+});
+
+test("删除任务记录的事件描述", () => {
+  const names = { share: (id: string) => id === "s_1" ? "某某合集" : null, file: (id: string) => id === "f_1" ? "episode01.mkv" : null };
+  expect(describeEvent({ type: "copy_released", id: "f_1", bytes: 412n * 1048576n, reason: "removed" }, names)?.text).toBe("episode01.mkv 的云端副本已释放（412 MB），任务记录已删除");
+  expect(describeEvent({ type: "copy_missing", id: "f_1", reason: "removed" }, names)?.text).toBe("episode01.mkv 的云端副本已不在云盘中，任务记录已删除");
+  expect(describeEvent({ type: "task_removed", id: "f_1" }, names)?.text).toBe("episode01.mkv 的任务记录已删除，本地文件保留");
+  expect(describeEvent({ type: "share_removed", id: "s_1" }, names)?.text).toBe("分享「某某合集」的任务都已删除，已从列表移除");
 });

@@ -126,7 +126,7 @@ test("详情页显示路径、原因与建议、断点、副本和本地目标",
   await press(keys.down, keys.down, keys.down, keys.down, keys.enter);
   const text = frame();
   for (const part of ["文件详情", "「纪录片合集」", "相对路径", "2.1 GB（2,254,857,830 字节）", "✗ 失败 · 下载地址多次刷新后仍被拒绝", "下载地址多次刷新后仍被拒绝",
-    "检查网络或代理后按 r 重试；断点已保存。", "3 次", "812 MB / 2.1 GB", "保留中 · 交付完成后才可能被回收", "PikPak-Test\\纪录片合集\\part1.mp4", "Esc 返回"]) expect(text).toContain(part);
+    "检查网络或代理后按 r 重试；断点已保存。", "3 次", "已下载部分 · 812 MB / 2.1 GB", "保留中 · 按 x 可立即释放", "PikPak-Test\\纪录片合集\\part1.mp4", "Esc 返回"]) expect(text).toContain(part);
   await press(keys.escape); expect(frame()).toContain("Enter 详情");
 });
 
@@ -324,16 +324,16 @@ test("x 释放云端副本：已完成与未完成文件的确认文字、分享
   await press("x");
   expect(controller.previews).toEqual(["f_1"]);
   expect(frame()).toContain("释放云端副本"); expect(frame()).toContain("释放 episode01.mkv 的云端副本（412 MB）？");
-  expect(frame()).toContain("不进回收站"); expect(frame()).not.toContain("重新转存");
+  expect(frame()).toContain("不进回收站"); expect(frame()).toContain("任务记录一并删除"); expect(frame()).not.toContain("重新转存");
   await press("n"); expect(frame()).not.toContain("释放云端副本"); expect(controller.commands).toEqual([]);
   await press("x", "y"); expect(controller.commands.at(-1)).toEqual({ kind: "releaseCopy", id: "f_1" });
 
-  controller.release = { ok: true, copies: 1, bytes: 412n * 1048576n, unfinished: 1 };
+  controller.release = { ok: true, copies: 1, bytes: 412n * 1048576n, unfinished: 1, removed: 0 };
   await press(keys.down, "x");
   expect(frame()).toContain("释放 episode02.mkv 的云端副本"); expect(frame()).toContain("继续时从分享重新转存"); expect(frame()).toContain("分享失效将无法完成");
   await press(keys.escape);
 
-  controller.release = { ok: true, copies: 2, bytes: 824n * 1048576n, unfinished: 0 };
+  controller.release = { ok: true, copies: 2, bytes: 824n * 1048576n, unfinished: 0, removed: 2 };
   await press(keys.up, keys.up, "x");
   expect(frame()).toContain("释放「某某合集」中 2 个云端副本（824 MB）？");
   await press("y"); expect(controller.commands.at(-1)).toEqual({ kind: "releaseCopy", id: "s_1" });
@@ -345,8 +345,43 @@ test("x 释放云端副本：已完成与未完成文件的确认文字、分享
   expect(controller.notes.at(-1)?.text).toBe("episode01.mkv：没有可释放的云端副本");
 
   // 详情页：x 打开同样的确认框，确认后回到详情页。
-  controller.release = { ok: true, copies: 1, bytes: 412n * 1048576n, unfinished: 0 };
+  controller.release = { ok: true, copies: 1, bytes: 412n * 1048576n, unfinished: 0, removed: 1 };
   await press(keys.enter); expect(frame()).toContain("x 释放云端副本");
   await press("x"); expect(frame()).toContain("确认释放");
   await press("y"); expect(controller.commands.at(-1)).toEqual({ kind: "releaseCopy", id: "f_1" }); expect(frame()).toContain("x 释放云端副本");
+});
+
+test("x 在云盘中已没有副本的已完成任务上只删除记录；已完成与未完成混合时说明两种结果", async () => {
+  const controller = new FakeController();
+  const { frame, press } = mount(controller); await settle();
+  controller.release = { ok: true, copies: 0, bytes: 0n, unfinished: 0, removed: 1 };
+  await press("x");
+  expect(frame()).toContain("删除任务记录"); expect(frame()).toContain("删除 episode01.mkv 的任务记录？");
+  expect(frame()).toContain("云盘中已没有这些副本，只删除任务记录，本地文件保留。"); expect(frame()).toContain("确认删除");
+  await press("y"); expect(controller.commands.at(-1)).toEqual({ kind: "releaseCopy", id: "f_1" });
+  controller.release = { ok: true, copies: 2, bytes: 824n * 1048576n, unfinished: 1, removed: 1 };
+  await press(keys.up, "x");
+  expect(frame()).toContain("已完成的删除任务记录"); expect(frame()).toContain("继续时从分享重新转存");
+});
+
+test("位置列：本地、部分、缺失与云端两格；分享行显示在云端与本地缺失数；记录删除后行消失，详情页回到主面板", async () => {
+  const controller = new FakeController();
+  const { frame, press } = mount(controller); await settle();
+  const line = (name: string) => frame().split("\n").find(item => item.includes(name)) ?? "";
+  expect(line("episode01.mkv")).toMatch(/412 MB\s+本地\s+已完成/);
+  expect(line("episode02.mkv")).toContain("部分 云端");
+  expect(line("episode03.mkv")).not.toMatch(/本地|部分|云端/);
+  expect(line("「某某合集」")).toContain("· 1 在云端");
+  const files = mockSnapshot().files;
+  files.s_1 = files.s_1!.map(item => item.id === "f_1" ? { ...item, copyState: "retained" as const } : item);
+  controller.update({ files }); await settle();
+  expect(line("episode01.mkv")).toContain("本地 云端"); expect(line("「某某合集」")).toContain("· 2 在云端");
+  controller.update({ localMissing: new Set(["f_1"]) }); await settle();
+  expect(line("episode01.mkv")).toContain("缺失 云端"); expect(line("「某某合集」")).toContain("· 1 本地缺失");
+  await press(keys.enter);
+  expect(frame()).toContain("本地文件"); expect(frame()).toContain("已不存在 · 被移动或删除");
+  // 释放成功后记录被删除：详情页回到主面板，行消失。
+  controller.update({ files: { ...files, s_1: files.s_1!.filter(item => item.id !== "f_1") } }); await settle();
+  expect(frame()).not.toContain("文件详情"); expect(frame()).toContain("q 退出");
+  expect(frame().split("\n").filter(item => item.includes("episode01.mkv") && !item.includes("校验通过"))).toEqual([]);
 });

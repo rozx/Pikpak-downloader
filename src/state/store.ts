@@ -41,6 +41,12 @@ const shareColumns = "id, account_id AS accountId, remote_id AS remoteId, output
 const fileColumns = "id, account_id AS accountId, share_id AS shareId, source_id AS sourceId, gcid, size, relative_path AS relativePath, state, retries, cancelled, last_error AS lastError";
 const fileValue = (row: FileRow): FileRecord => ({ ...row, size: BigInt(row.size), cancelled: row.cancelled === 1n });
 const timestamp = () => BigInt(Date.now());
+// 可以删除记录的文件（别名 f）：已完成；引用的副本都已删除；它转存产生的副本没有被其他文件引用；没有未核对的操作；没有账号暂停指向它。
+const forgettable = `f.state='completed'
+  AND NOT EXISTS(SELECT 1 FROM copy_references r JOIN copies c ON c.id=r.copy_id WHERE r.file_id=f.id AND c.state<>'deleted')
+  AND NOT EXISTS(SELECT 1 FROM copies c JOIN operations o ON o.id=c.operation_id JOIN copy_references r ON r.copy_id=c.id WHERE o.file_id=f.id AND r.file_id<>f.id)
+  AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.file_id=f.id AND o.status<>'confirmed')
+  AND NOT EXISTS(SELECT 1 FROM pauses p WHERE p.file_id=f.id)`;
 const identifier = (prefix: string) => `${prefix}_${randomUUID()}`;
 
 export class Store {
@@ -395,8 +401,9 @@ export class Store {
       AND NOT EXISTS(SELECT 1 FROM copy_references r JOIN files f ON f.id=r.file_id WHERE r.copy_id=c.id AND (f.state='publishing'
         OR EXISTS(SELECT 1 FROM operations o WHERE o.file_id=f.id AND o.status<>'confirmed' AND o.kind<>'delete')))`, copyId, accountId);
   }
-  // 文件或分享中保留着的副本；没有可释放的副本时给出原因（正在使用优先于非本工具创建，最后是没有副本）。
-  releaseTargets(accountId: string, id: string): { targets: ReleaseTarget[]; reason: string | null } {
+  // 文件或分享中保留着的副本，以及云端已没有副本、可以直接删除记录的已完成文件（orphans）；
+  // 两者都没有时给出原因（正在使用优先于非本工具创建，最后是没有副本）。
+  releaseTargets(accountId: string, id: string): { targets: ReleaseTarget[]; orphans: string[]; reason: string | null } {
     const shareScope = id.startsWith("s_");
     if (shareScope) this.share(accountId, id); else this.file(accountId, id);
     const rows = this.all<{ id: string }>(`SELECT DISTINCT c.id FROM copies c JOIN copy_references r ON r.copy_id=c.id JOIN files f ON f.id=r.file_id
@@ -409,7 +416,41 @@ export class Store {
       const files = this.all<{ id: string; state: FileState }>("SELECT f.id,f.state FROM copy_references r JOIN files f ON f.id=r.file_id WHERE r.copy_id=? ORDER BY f.rowid", copy.id);
       targets.push({ copy, fileIds: files.map(file => file.id), completed: files.every(file => file.state === "completed") });
     }
-    return { targets, reason: targets.length ? null : busy ? "copy_in_use" : notOwned ? "copy_not_owned" : "copy_absent" };
+    const orphans = this.all<{ id: string }>(`SELECT f.id FROM files f WHERE f.account_id=? AND ${shareScope ? "f.share_id=?" : "f.id=?"}
+      AND ${forgettable} ORDER BY f.rowid`, accountId, id).map(row => row.id);
+    return { targets, orphans, reason: targets.length || orphans.length ? null : busy ? "copy_in_use" : notOwned ? "copy_not_owned" : "copy_absent" };
+  }
+  // 释放后删除任务记录（add-task-controls 决策 7）：已完成、云端已没有本工具管理的副本、没有未核对操作的文件。本地文件不动。
+  forgettable(accountId: string, fileId: string): boolean {
+    return !!this.get(`SELECT f.id FROM files f WHERE f.id=? AND f.account_id=? AND ${forgettable}`, fileId, accountId);
+  }
+  forgetFile(accountId: string, fileId: string): boolean {
+    return this.transaction(() => {
+      if (!this.forgettable(accountId, fileId)) return false;
+      const created = "SELECT c.id FROM copies c JOIN operations o ON o.id=c.operation_id WHERE o.file_id=?";
+      this.run(`DELETE FROM copy_references WHERE file_id=? OR copy_id IN (${created})`, fileId, fileId);
+      this.run(`DELETE FROM copies WHERE id IN (${created})`, fileId);
+      for (const table of ["operations", "deliveries", "name_reservations", "scan_files"]) this.run(`DELETE FROM ${table} WHERE file_id=?`, fileId);
+      this.run("DELETE FROM files WHERE id=?", fileId);
+      return true;
+    });
+  }
+  // 分享的文件记录都已删除、扫描已完整完成且没有待执行的重新扫描时，分享记录也删除。
+  shareForgettable(accountId: string, shareId: string): boolean {
+    const share = this.share(accountId, shareId);
+    return share.scanStatus === "complete" && share.requestedRevision === share.attemptedRevision
+      && !this.get("SELECT id FROM files WHERE share_id=? LIMIT 1", shareId) && !this.get("SELECT id FROM scans WHERE share_id=? AND status='active'", shareId);
+  }
+  // 返回分享的访问资料引用，由调用者在不再被引用时回收；不满足条件时返回 null。
+  forgetShare(accountId: string, shareId: string): string | null {
+    return this.transaction(() => {
+      if (!this.shareForgettable(accountId, shareId)) return null;
+      const secretRef = this.share(accountId, shareId).secretRef, scans = "SELECT id FROM scans WHERE share_id=?";
+      for (const table of ["scan_directories", "scan_pages", "scan_issues", "scan_files"]) this.run(`DELETE FROM ${table} WHERE scan_id IN (${scans})`, shareId);
+      for (const table of ["scans", "directories", "name_reservations"]) this.run(`DELETE FROM ${table} WHERE share_id=?`, shareId);
+      this.run("DELETE FROM shares WHERE id=?", shareId);
+      return secretRef;
+    });
   }
   // 副本已发出删除（deleting）或已确认不在云盘中（deleted）：引用它的未完成文件改回就绪、保留断点，下次执行时重新转存。
   // 已校验完成、只差落盘的文件不需要副本，保持原状态。
@@ -457,6 +498,11 @@ export class Store {
     this.file(accountId, fileId);
     this.run("INSERT INTO deliveries(file_id,account_id,temp_path,target_path) VALUES(?,?,?,?) ON CONFLICT(file_id) DO NOTHING", fileId, accountId, tempPath, targetPath);
     return this.delivery(accountId, fileId)!;
+  }
+  // 已完成文件交付的目标路径；界面据此只读检查本地文件是否仍在（add-task-controls 决策 6）。
+  deliveredTargets(accountId: string): Array<{ fileId: string; targetPath: string }> {
+    return this.all(`SELECT d.file_id AS fileId,d.target_path AS targetPath FROM deliveries d JOIN files f ON f.id=d.file_id
+      WHERE d.account_id=? AND f.state='completed' AND d.completed_at IS NOT NULL ORDER BY f.rowid`, accountId);
   }
   delivery(accountId: string, fileId: string): Delivery | null {
     const row = this.get<Omit<Delivery, "checkpoint" | "ranges"> & { checkpoint: string; rangesJson: string | null; size: string }>(`SELECT file_id AS fileId,

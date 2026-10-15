@@ -136,3 +136,24 @@ test("文件完成后立即刷新本地剩余空间，不等下一个周期", as
   } finally { await f.close(); }
 });
 
+test("已完成文件的本地文件是否仍在：存在、被删除后标为缺失、无法判断时保留上次结果", async () => {
+  let unknown = false;
+  const f = await fixture({ localMs: 60_000, flushMs: 0, exists: async path => unknown ? null : Bun.file(path).exists() });
+  try {
+    const target = join(f.root, "episode01.mkv"); await writeFile(target, "x");
+    f.store.allocateDelivery("account", f.file.id, join(f.root, "episode01.part"), target);
+    f.store.bindTemporary("account", f.file.id, { volume: "volume", file: "identity" });
+    for (const state of ["ready", "downloading", "verifying"] as const) f.store.transition("account", f.file.id, state);
+    f.store.planPublication("account", f.file.id, { parent: "p", name: "episode01.mkv", tempParent: "t", tempName: "episode01.part", baseName: "episode01.mkv" }, target, "a".repeat(64));
+    f.store.completePublication("account", f.file.id, { volume: "volume", file: "identity" }, "a".repeat(64));
+    expect(f.store.deliveredTargets("account")).toEqual([{ fileId: f.file.id, targetPath: target }]);
+    f.live.start(); await Bun.sleep(30);
+    expect(f.live.snapshot().localMissing.has(f.file.id)).toBe(false);
+    await rm(target); f.emit({ type: "completed", id: f.file.id }); await Bun.sleep(30);
+    expect(f.live.snapshot().localMissing.has(f.file.id)).toBe(true);
+    unknown = true; await writeFile(target, "x"); f.emit({ type: "completed", id: f.file.id }); await Bun.sleep(30);
+    expect(f.live.snapshot().localMissing.has(f.file.id)).toBe(true);
+    unknown = false; f.emit({ type: "completed", id: f.file.id }); await Bun.sleep(30);
+    expect(f.live.snapshot().localMissing.has(f.file.id)).toBe(false);
+  } finally { await f.close(); }
+});

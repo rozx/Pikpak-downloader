@@ -1,4 +1,5 @@
 import { dirname } from "node:path";
+import { stat } from "node:fs/promises";
 import type { Store } from "../state/store";
 import type { ReleasePreview, RuntimeEvent } from "../runtime/engine";
 import type { CommandResult, RuntimeSession, SessionCommand } from "../runtime/session";
@@ -15,10 +16,14 @@ export type LiveOptions = {
   store: Store; accountId: string; session: Pick<RuntimeSession, "subscribe" | "command"> & Partial<Pick<RuntimeSession, "releasable">>;
   quota: () => Promise<{ usage: bigint; limit: bigint }>; localFree: () => Promise<bigint>;
   stop: () => void; forceExit: () => void; open?: (path: string) => Promise<OpenResult>; tier?: () => Tier;
+  // 本地文件是否存在：true 存在，false 不存在，null 无法判断（保留上次结果）。
+  exists?: (path: string) => Promise<boolean | null>;
   now?: () => number; snapshotMs?: number; flushMs?: number; quotaMs?: number; localMs?: number; maxEvents?: number;
 };
 // 这些事件前后会发生转存、回收或交付，云盘容量随之变化。
 const quotaEvents = new Set(["downloading", "completed", "waiting_space", "copy_released"]);
+const pathExists = (path: string): Promise<boolean | null> =>
+  stat(path).then(() => true, (error: { code?: string }) => error.code === "ENOENT" || error.code === "ENOTDIR" ? false : null);
 
 // 真实控制器：快照每 500 ms 或收到事件时重建，但通知界面最多每 flushMs 一次；云盘容量与本地空间按各自周期刷新。
 export class LiveController implements TuiController {
@@ -32,6 +37,8 @@ export class LiveController implements TuiController {
   private lastFlush = 0;
   private quota: TuiSnapshot["quota"] = null;
   private localFree: bigint | null = null;
+  private missing = new Set<string>();
+  private checking = false;
   private clipboard: TuiSnapshot["clipboard"];
   private stopping = false;
   private completed = 0;
@@ -47,8 +54,8 @@ export class LiveController implements TuiController {
     this.unsubscribe = this.options.session.subscribe(event => this.handle(event));
     this.timers.push(setInterval(() => this.refresh(), this.options.snapshotMs ?? 500));
     this.timers.push(setInterval(() => void this.refreshQuota(), this.options.quotaMs ?? 60_000));
-    this.timers.push(setInterval(() => void this.refreshLocal(), this.options.localMs ?? 10_000));
-    void this.refreshQuota(); void this.refreshLocal();
+    this.timers.push(setInterval(() => { void this.refreshLocal(); void this.refreshPresence(); }, this.options.localMs ?? 10_000));
+    void this.refreshQuota(); void this.refreshLocal(); void this.refreshPresence();
   }
   dispose(): void {
     this.unsubscribe?.(); this.unsubscribe = null;
@@ -94,7 +101,7 @@ export class LiveController implements TuiController {
       if (event.type === "started" && event.reason === "clipboard_off") this.clipboard = "off";
       if (quotaEvents.has(event.type)) void this.refreshQuota();
       // 文件完成发布后本地剩余空间随之变化，立即刷新，不等下一个周期。
-      if (event.type === "completed") void this.refreshLocal();
+      if (event.type === "completed") { void this.refreshLocal(); void this.refreshPresence(); }
       const line = describeEvent(event, { share: id => this.shareTitle(id), file: id => this.fileTitle(id) });
       if (line) this.log(line);
     }
@@ -117,6 +124,20 @@ export class LiveController implements TuiController {
     try { this.localFree = await this.options.localFree(); this.refresh(); } catch { /* 读不到本地空间时保留上次结果。 */ }
   }
 
+  // 已完成文件交付的本地文件是否仍在（add-task-controls 决策 6）：只 stat，不打开文件、不改任务库；无法判断时保留上次结果。
+  private async refreshPresence(): Promise<void> {
+    if (this.checking) return; this.checking = true;
+    try {
+      const exists = this.options.exists ?? pathExists, next = new Set<string>();
+      for (const target of this.options.store.deliveredTargets(this.options.accountId)) {
+        const present = await exists(target.targetPath);
+        if (present === false || (present === null && this.missing.has(target.fileId))) next.add(target.fileId);
+      }
+      if (next.size !== this.missing.size || [...next].some(id => !this.missing.has(id))) { this.missing = next; this.refresh(); }
+    } catch { /* 任务库不可读时保留上次结果。 */ }
+    finally { this.checking = false; }
+  }
+
   private build(): TuiSnapshot {
     const { store, accountId } = this.options;
     const shares = store.shareViews(accountId);
@@ -125,7 +146,8 @@ export class LiveController implements TuiController {
     for (const [id, value] of this.progress) progress[id] = { ...value, rate: this.meter.rate(id), eta: this.meter.eta(id, value.size) };
     return { shares, files, quota: this.quota, localFree: this.localFree, clipboard: this.clipboard,
       userPaused: store.config("queue_paused") === "1", systemPause: store.paused(accountId), progress, events: [...this.events],
-      outputRoot: store.config("output_root"), stopping: this.stopping, connections: configuredConnections(store), activeFiles: this.activeFiles() };
+      outputRoot: store.config("output_root"), stopping: this.stopping, connections: configuredConnections(store), activeFiles: this.activeFiles(),
+      localMissing: this.missing };
   }
   private activeFiles(): TuiSnapshot["activeFiles"] {
     const configured = configuredActiveFiles(this.options.store), tier = this.options.tier?.() ?? "unknown";

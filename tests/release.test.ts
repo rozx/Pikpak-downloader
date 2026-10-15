@@ -51,7 +51,7 @@ test.if(nativeFiles)("暂停中的文件释放副本后改回就绪、保留断�
     step.abort(); expect(await running).toBe(false);
     f.store.pauseTask("account", file.id);
     expect(f.store.file("account", file.id).state).toBe("downloading");
-    expect(engine.releasable(file.id)).toEqual({ ok: true, copies: 1, bytes: BigInt(3 * MiB), unfinished: 1 });
+    expect(engine.releasable(file.id)).toEqual({ ok: true, copies: 1, bytes: BigInt(3 * MiB), unfinished: 1, removed: 0 });
     expect(engine.release(file.id, new AbortController().signal)).toMatchObject({ ok: true, copies: 1 });
     // 释放进行中：同一文件不能再次释放。
     expect(engine.releasable(file.id)).toEqual({ ok: false, reason: "copy_in_use" });
@@ -88,10 +88,12 @@ test.if(nativeFiles)("下载池中的文件不能释放；已完成文件释放�
     expect(engine.activeFiles().map(target => target.fileId)).toEqual([second!.id]);
     expect(engine.releasable(second!.id)).toEqual({ ok: false, reason: "copy_in_use" });
     // 分享范围只包含可以释放的那份。
-    expect(engine.releasable(f.share.id)).toEqual({ ok: true, copies: 1, bytes: 40n, unfinished: 0 });
+    expect(engine.releasable(f.share.id)).toEqual({ ok: true, copies: 1, bytes: 40n, unfinished: 0, removed: 1 });
     engine.release(f.share.id, signal); await engine.settleReleases();
     expect(f.state.deleted).toEqual(["copy-1"]); expect(f.store.candidates("account")).toEqual([]);
-    expect(events.some(event => event.type === "copy_released" && event.id === first!.id)).toBe(true);
+    expect(events.some(event => event.type === "copy_released" && event.id === first!.id && event.reason === "removed")).toBe(true);
+    // 已完成文件的记录随释放删除；分享还有文件，保留。
+    expect(f.store.fileViews("account", f.share.id).map(file => file.id)).toEqual([second!.id]);
     await engine.stopActive();
     const db = new Database(f.store.path); db.run("UPDATE copies SET ownership='unverified', evidence_json=NULL"); db.close();
     expect(engine.releasable(second!.id)).toEqual({ ok: false, reason: "copy_not_owned" });
@@ -120,8 +122,37 @@ test.if(nativeFiles)("云端操作锁：手动释放进行时，自动回收等�
     expect(f.state.deleted).toEqual([]); expect(f.state.saves).toBe(1);
     open(); await engine.settleReleases(); await stepping;
     for (let i = 0; i < 5 && f.store.summary("account", f.share.id).status !== "completed"; i++) await engine.step(signal);
-    expect(f.store.summary("account", f.share.id)).toMatchObject({ status: "completed", completed: 2 });
+    // 第一个文件随释放删除了记录，分享里只剩第二个文件。
+    expect(f.store.summary("account", f.share.id)).toMatchObject({ status: "completed", total: 1, completed: 1 });
     expect(f.state.deleted).toEqual(["copy-1"]); expect(events.filter(event => event.type === "copy_released")).toHaveLength(1);
     expect(f.store.unresolved("account")).toEqual([]);
+  } finally { await f.close(); }
+});
+
+test.if(nativeFiles)("释放后删除记录：已完成文件随副本删除；被自动回收过的已完成文件直接删除记录；分享的文件都删除后分享与访问资料一并删除", async () => {
+  const f = await engineFixture(localFiles(), 2);
+  const { engine, events } = engineFor(f);
+  try {
+    const signal = new AbortController().signal;
+    // 容量只够一个文件：第二个文件转存前自动回收第一个文件的副本。
+    for (let i = 0; i < 10 && f.store.summary("account", f.share.id).status !== "completed"; i++) await engine.step(signal);
+    const [first, second] = f.store.fileViews("account", f.share.id);
+    expect(f.state.deleted).toEqual(["copy-1"]); expect(first!.copyState).toBe("deleted"); expect(second!.copyState).toBe("retained");
+    const reference = f.store.share("account", f.share.id).secretRef;
+    expect(await f.secrets.get(reference)).not.toBe(null);
+    // 第一个文件云盘里已没有副本：只删记录。
+    expect(engine.releasable(first!.id)).toEqual({ ok: true, copies: 0, bytes: 0n, unfinished: 0, removed: 1 });
+    engine.release(first!.id, signal); await engine.settleReleases();
+    expect(events.filter(event => event.type === "task_removed")).toEqual([{ type: "task_removed", id: first!.id }]);
+    expect(f.store.fileViews("account", f.share.id).map(file => file.id)).toEqual([second!.id]);
+    // 本地文件不动。
+    expect(await readFile(f.store.delivery("account", second!.id)!.targetPath)).toEqual(f.sources[1]!.bytes);
+    // 释放整个分享：最后一个文件的副本删除、记录删除，分享与访问资料随之删除。
+    expect(engine.releasable(f.share.id)).toEqual({ ok: true, copies: 1, bytes: 40n, unfinished: 0, removed: 1 });
+    engine.release(f.share.id, signal); await engine.settleReleases();
+    expect(f.state.deleted).toEqual(["copy-1", "copy-2"]);
+    expect(events.map(event => event.type).filter(type => ["copy_released", "share_removed"].includes(type))).toEqual(["copy_released", "share_removed"]);
+    expect(f.store.shareViews("account")).toEqual([]); expect(await f.secrets.get(reference)).toBe(null);
+    expect(() => engine.releasable(f.share.id)).toThrow();
   } finally { await f.close(); }
 });

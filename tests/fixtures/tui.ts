@@ -38,7 +38,7 @@ export function mockSnapshot(): TuiSnapshot {
     events: [{ at: Date.parse("2026-10-14T22:31:07"), icon: "⟳", tone: "scan", text: "「某某合集」扫描完成：3 个文件" },
       { at: Date.parse("2026-10-14T22:32:12"), icon: "✗", tone: "error", text: "part1.mp4 下载失败" },
       { at: Date.parse("2026-10-14T22:33:40"), icon: "✓", tone: "done", text: "episode01.mkv 校验通过，已完成" }],
-    outputRoot: "C:\\Users\\demo\\Downloads\\PikPak-Test", stopping: false, connections: 4, activeFiles: { configured: 1, effective: 1, tier: "paid" },
+    outputRoot: "C:\\Users\\demo\\Downloads\\PikPak-Test", stopping: false, connections: 4, activeFiles: { configured: 1, effective: 1, tier: "paid" }, localMissing: new Set<string>(),
   };
 }
 
@@ -51,7 +51,7 @@ export class FakeController implements TuiController {
   stops = 0; forced = 0;
   result: CommandResult = { ok: true, ids: [], issues: [] };
   openResult: OpenResult = { ok: true };
-  release: ReleasePreview = { ok: true, copies: 1, bytes: 412n * 1048576n, unfinished: 0 };
+  release: ReleasePreview = { ok: true, copies: 1, bytes: 412n * 1048576n, unfinished: 0, removed: 1 };
   readonly previews: string[] = [];
   constructor(snapshot: TuiSnapshot = mockSnapshot()) { this.current = snapshot; }
   snapshot = () => this.current;

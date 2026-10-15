@@ -272,7 +272,7 @@ test("释放云端副本：命令立即返回并在事件中报告副本数；�
   const f = await storeFixture();
   try {
     const fake = fakeEngine(async () => false); const signals: AbortSignal[] = [];
-    fake.engine.release = (id, signal) => { signals.push(signal); return id === f.first.id ? { ok: true, copies: 2, bytes: 20n, unfinished: 1 } : { ok: false, reason: "copy_absent" }; };
+    fake.engine.release = (id, signal) => { signals.push(signal); return id === f.first.id ? { ok: true, copies: 2, bytes: 20n, unfinished: 1, removed: 1 } : { ok: false, reason: "copy_absent" }; };
     fake.engine.releasable = () => ({ ok: false, reason: "copy_in_use" });
     const session = new RuntimeSession(f.store, "account", fake.engine, f.receiver, fakeClipboard().clipboard);
     const events: RuntimeEvent[] = []; session.subscribe(event => events.push(event));

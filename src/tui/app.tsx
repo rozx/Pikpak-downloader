@@ -8,9 +8,18 @@ import { CONFIRM_LINES, ConfirmDialog, DetailPage, PASTE_BOX_LINES, PasteBox, SE
 import { MAX_CONNECTIONS } from "../download/connections";
 import { MAX_ACTIVE_FILES } from "../runtime/active-files";
 import { formatBytes } from "./format";
+import type { ReleasePreview } from "../runtime/engine";
+
+// 释放确认框的说明（add-task-controls 决策 5、7）：只删记录、只有已完成、只有未完成、两者都有。
+function releaseDetail(preview: Extract<ReleasePreview, { ok: true }>): string {
+  if (preview.copies === 0) return "云盘中已没有这些副本，只删除任务记录，本地文件保留。";
+  if (preview.unfinished === 0) return "将永久删除 PikPak 中的副本（不进回收站），本地文件保留，任务记录一并删除。";
+  if (preview.removed === 0) return "将永久删除 PikPak 中的副本，断点保留；继续时从分享重新转存，分享失效将无法完成。";
+  return "永久删除 PikPak 中的副本：已完成的删除任务记录，未完成的保留断点、继续时从分享重新转存。";
+}
 
 type Screen = { kind: "main" } | { kind: "detail"; fileId: string } | { kind: "settings" } | { kind: "paste" }
-  | { kind: "confirm"; action: "cancel" | "release"; id: string; title: string; unfinished?: boolean; back: Screen } | { kind: "quit" };
+  | { kind: "confirm"; action: "cancel" | "release"; id: string; title: string; release?: Extract<ReleasePreview, { ok: true }>; back: Screen } | { kind: "quit" };
 
 export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: { controller: TuiController; theme?: Theme; size?: Size }) {
   const windowSize = useWindowSize();
@@ -24,7 +33,7 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   const [pasteMessage, setPasteMessage] = useState<string | null>(null);
   const [setting, setSetting] = useState({ selected: 0, editing: false, error: null as string | null });
 
-  const rows = useMemo(() => buildRows({ shares: snapshot.shares, files: snapshot.files, expanded, userPaused: snapshot.userPaused }), [snapshot, expanded]);
+  const rows = useMemo(() => buildRows({ shares: snapshot.shares, files: snapshot.files, expanded, userPaused: snapshot.userPaused, missing: snapshot.localMissing }), [snapshot, expanded]);
   const found = rows.findIndex(row => row.key === selectedKey);
   const selected = found >= 0 ? found : Math.min(Math.max(0, rows.findIndex(row => row.kind === "file")), Math.max(0, rows.length - 1));
   const row = rows[selected];
@@ -58,8 +67,9 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
     const name = target.kind === "share" ? `「${target.share.title ?? target.share.id}」` : target.name;
     const preview = controller.releasePreview(id);
     if (!preview.ok) { controller.note({ icon: "!", tone: "warning", text: `${name}：${explain(preview.reason).reason}` }); return; }
-    const title = target.kind === "share" ? `释放${name}中 ${preview.copies} 个云端副本（${formatBytes(preview.bytes)}）？` : `释放 ${name} 的云端副本（${formatBytes(preview.bytes)}）？`;
-    setScreen({ kind: "confirm", action: "release", id, title, unfinished: preview.unfinished > 0, back });
+    const title = preview.copies === 0 ? (target.kind === "share" ? `删除${name}中 ${preview.removed} 个已完成任务的记录？` : `删除 ${name} 的任务记录？`)
+      : target.kind === "share" ? `释放${name}中 ${preview.copies} 个云端副本（${formatBytes(preview.bytes)}）？` : `释放 ${name} 的云端副本（${formatBytes(preview.bytes)}）？`;
+    setScreen({ kind: "confirm", action: "release", id, title, release: preview, back });
   };
   const open = async (target: Row | undefined) => {
     if (!target) return;
@@ -110,6 +120,8 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   }, { isActive: screen.kind === "quit" && !snapshot.stopping });
 
   const detailFile = screen.kind === "detail" ? Object.values(snapshot.files).flat().find(file => file.id === screen.fileId) : undefined;
+  // 详情页的文件记录被删除（释放后）时回到主面板。
+  useEffect(() => { if (screen.kind === "detail" && !detailFile) setScreen({ kind: "main" }); }, [screen, detailFile]);
   const detailRow = detailFile ? rows.find(item => item.kind === "file" && item.file.id === detailFile.id) : undefined;
   useInput((input, key) => {
     if (key.escape) setScreen({ kind: "main" });
@@ -175,7 +187,8 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   }
   if (screen.kind === "detail" && detailFile) {
     const share = snapshot.shares.find(item => item.id === detailFile.shareId);
-    return <DetailPage file={detailFile} shareTitle={share?.title ?? detailFile.shareId} targetPath={controller.targetPath(detailFile.id)} userPaused={snapshot.userPaused} size={size} theme={theme} />;
+    return <DetailPage file={detailFile} shareTitle={share?.title ?? detailFile.shareId} targetPath={controller.targetPath(detailFile.id)} userPaused={snapshot.userPaused}
+      missing={snapshot.localMissing.has(detailFile.id)} size={size} theme={theme} />;
   }
   if (screen.kind === "settings") {
     return <SettingsPage outputRoot={snapshot.outputRoot} clipboardOn={snapshot.clipboard !== "off"} connections={snapshot.connections} activeFiles={snapshot.activeFiles} selected={setting.selected} editing={setting.editing}
@@ -186,10 +199,9 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
     : screen.kind === "paste" ? [["Enter", "提交"], ["Esc", "取消"]]
     : [["←→", "折叠"], ["Enter", "详情"], ["r", "重试"], ["c", "取消"], ["p", row && selectedPaused(row) ? "继续" : "暂停"],
       ["P", anyPaused ? "全部开始" : "全部暂停"], ["x", "释放"], ["o", "目录"], ["a", "粘贴"], ["s", "设置"], ["q", "退出"]];
-  const overlay = screen.kind === "confirm" && screen.action === "release"
-    ? <ConfirmDialog heading="释放云端副本" title={screen.title} confirm="确认释放" theme={theme} detail={screen.unfinished
-      ? "将永久删除 PikPak 中的副本，断点保留；继续时从分享重新转存，分享失效将无法完成。"
-      : "将永久删除 PikPak 中的副本（不进回收站），本地文件保留。"} />
+  const overlay = screen.kind === "confirm" && screen.release
+    ? <ConfirmDialog heading={screen.release.copies ? "释放云端副本" : "删除任务记录"} title={screen.title} confirm={screen.release.copies ? "确认释放" : "确认删除"}
+      detail={releaseDetail(screen.release)} theme={theme} />
     : screen.kind === "confirm"
     ? <ConfirmDialog heading="取消任务" title={screen.title} detail="本地文件、断点和云端副本都会保留，之后可用 r 恢复。" confirm="确认取消" theme={theme} />
     : screen.kind === "quit" ? <ConfirmDialog heading="退出程序" title="停止下载并退出？" detail="当前下载会在安全点停止并保存断点，下次启动继续。" confirm="停止并退出" theme={theme} />

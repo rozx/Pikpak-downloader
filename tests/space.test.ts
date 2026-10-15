@@ -158,14 +158,14 @@ test("手动释放：未完成文件改回就绪并保留断点；非本工具�
     expect(f.store.copyForFile("account", unfinished.file.id)).toBe(null);
 
     const unowned = f.add("unowned", true, false);
-    expect(f.store.releaseTargets("account", unowned.file.id)).toEqual({ targets: [], reason: "copy_not_owned" });
+    expect(f.store.releaseTargets("account", unowned.file.id)).toEqual({ targets: [], orphans: [], reason: "copy_not_owned" });
     expect(await f.manager.release(unowned.copyId, unowned.file.id)).toEqual({ outcome: "skipped" });
     const busy = f.add("busy", false, true); f.store.beginOperation("account", busy.file.id, "restore");
-    expect(f.store.releaseTargets("account", busy.file.id)).toEqual({ targets: [], reason: "copy_in_use" });
+    expect(f.store.releaseTargets("account", busy.file.id)).toEqual({ targets: [], orphans: [], reason: "copy_in_use" });
     const none = f.store.mergeFile(f.scan, { sourceId: "never-saved", size: 5n, gcid: "a".repeat(40), relativePath: "synthetic" });
-    expect(f.store.releaseTargets("account", none.id)).toEqual({ targets: [], reason: "copy_absent" });
+    expect(f.store.releaseTargets("account", none.id)).toEqual({ targets: [], orphans: [], reason: "copy_absent" });
     // 分享范围：只列出可释放的副本；不能释放的不影响其他副本。
-    expect(f.store.releaseTargets("account", f.share.id)).toEqual({ targets: [], reason: "copy_in_use" });
+    expect(f.store.releaseTargets("account", f.share.id)).toEqual({ targets: [], orphans: [], reason: "copy_in_use" });
     const other = f.add("other", true, true);
     expect(f.store.releaseTargets("account", f.share.id).targets.map(target => target.copy.id)).toEqual([other.copyId]);
     expect(f.state.deletions).toEqual(["unfinished"]);
@@ -184,3 +184,28 @@ test("手动释放：副本已被改动时改为受保护、已不存在时记�
   } finally { await f.close(); }
 });
 
+test("删除任务记录：只删已完成且云端副本都已删除、没有未核对操作的文件；文件都删除且扫描完成后分享也删除", async () => {
+  const f = await fixture();
+  try {
+    const released = f.add("released", true, true), kept = f.add("kept", true, true), pending = f.add("pending", true, true);
+    expect(await f.manager.release(released.copyId, released.file.id)).toEqual({ outcome: "released" });
+    expect(f.store.forgettable("account", kept.file.id)).toBe(false); // 副本仍保留在云端
+    f.store.copyState("account", pending.copyId, "deleted"); f.store.beginOperation("account", pending.file.id, "publish");
+    expect(f.store.forgettable("account", pending.file.id)).toBe(false); // 有未核对的操作
+    expect(f.store.releaseTargets("account", f.share.id)).toMatchObject({ orphans: [released.file.id] });
+    expect(f.store.forgetFile("account", kept.file.id)).toBe(false);
+    expect(f.store.forgetFile("account", released.file.id)).toBe(true);
+    expect(() => f.store.file("account", released.file.id)).toThrow(); expect(() => f.store.copy("account", released.copyId)).toThrow();
+    expect(f.store.files("account").map(file => file.id).sort()).toEqual([kept.file.id, pending.file.id].sort());
+    // 还有文件、扫描未完成时分享保留。
+    expect(f.store.forgetShare("account", f.share.id)).toBe(null);
+    const db = new Database(f.path); db.run("PRAGMA foreign_keys=ON");
+    for (const file of [kept, pending]) { db.run("DELETE FROM operations WHERE file_id=? AND status<>'confirmed'", [file.file.id]); db.run("UPDATE copies SET state='deleted' WHERE id=?", [file.copyId]); }
+    db.close();
+    for (const file of [kept, pending]) expect(f.store.forgetFile("account", file.file.id)).toBe(true);
+    expect(f.store.forgetShare("account", f.share.id)).toBe(null); // 扫描仍在进行
+    f.store.finishScan(f.scan, true);
+    expect(f.store.forgetShare("account", f.share.id)).toBe("reference");
+    expect(f.store.shareViews("account")).toEqual([]); expect(f.store.secretReferenced("reference")).toBe(false);
+  } finally { await f.close(); }
+});

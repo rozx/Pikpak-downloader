@@ -12,9 +12,14 @@ import { DEFAULT_ACTIVE_FILES, MAX_ACTIVE_FILES } from "../runtime/active-files"
 import { PAID_ACTIVE_FILES } from "../pikpak/tier";
 import type { TuiSnapshot } from "./controller";
 
-const copyStates: Record<string, string> = { retained: "保留中 · 交付完成后才可能被回收", deleting: "回收中", deleted: "已回收", protected: "受保护 · 不会自动回收" };
-export function DetailPage({ file, shareTitle, targetPath, userPaused, size, theme }: {
-  file: FileView; shareTitle: string; targetPath: string | null; userPaused: boolean; size: Size; theme: Theme;
+const copyStates: Record<string, string> = { retained: "保留中 · 按 x 可立即释放", deleting: "删除中", deleted: "已删除 · 不在云盘中", protected: "受保护 · 不会自动删除" };
+// 本地文件一行（add-task-controls 决策 6）：已完成看交付的文件是否仍在，未完成看断点。
+function localState(file: FileView, missing: boolean): [string, Tone] {
+  if (file.state === "completed") return missing ? ["已不存在 · 被移动或删除", "warning"] : ["存在", "done"];
+  return file.checkpoint > 0n ? [`已下载部分 · ${formatBytes(file.checkpoint)} / ${formatBytes(file.size)}`, "text"] : ["尚未下载", "muted"];
+}
+export function DetailPage({ file, shareTitle, targetPath, userPaused, missing = false, size, theme }: {
+  file: FileView; shareTitle: string; targetPath: string | null; userPaused: boolean; missing?: boolean; size: Size; theme: Theme;
 }) {
   const look = fileLook(file, { userPaused }), reason = explain(file.lastError);
   const fields: Array<[string, string, Tone]> = [
@@ -22,8 +27,8 @@ export function DetailPage({ file, shareTitle, targetPath, userPaused, size, the
     ["大小", `${formatBytes(file.size)}（${file.size.toLocaleString("en-US")} 字节）`, "text"], ["状态", `${look.icon} ${look.label}`, look.tone],
     ...(reason.reason ? [["原因", reason.reason, "error"], ["建议", reason.advice, "active"]] as Array<[string, string, Tone]> : []),
     ["已重试", `${file.retries} 次`, "text"],
-    ...(file.checkpoint > 0n && file.state !== "completed" ? [["断点", `${formatBytes(file.checkpoint)} / ${formatBytes(file.size)}`, "text"]] as Array<[string, string, Tone]> : []),
-    ["云端副本", file.copyState ? copyStates[file.copyState] ?? file.copyState : "尚未转存", "text"],
+    ["本地文件", ...localState(file, missing)],
+    ["云端副本", file.copyState ? copyStates[file.copyState] ?? file.copyState : "尚未转存", file.copyState === "retained" ? "transfer" : "text"],
     ["本地目标", targetPath ?? "尚未分配", "muted"],
   ];
   return (

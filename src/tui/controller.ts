@@ -15,6 +15,8 @@ export type TuiSnapshot = {
   progress: Record<string, Progress>; events: LogEntry[]; outputRoot: string | null; stopping: boolean; connections: number;
   // 同时下载的文件数：配置值、账号等级与实际生效值（add-concurrent-file-downloads）。
   activeFiles: { configured: number; effective: number; tier: Tier };
+  // 已完成但交付的本地文件已不存在（被移动或删除）的文件 ID。
+  localMissing: ReadonlySet<string>;
 };
 export type PastePreview = { shares: number; paired: number; issues: string[] };
 export type OpenResult = { ok: true } | { ok: false; reason: string };

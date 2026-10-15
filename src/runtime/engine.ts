@@ -13,13 +13,14 @@ import { publishVerified, reconcilePublication } from "../download/publish";
 import { originalLink, secureDownloadUrl } from "../download/original-link";
 import { configuredConnections } from "../download/connections";
 import { configuredActiveFiles } from "./active-files";
+import { collectShareAccess } from "../auth/share-access";
 import type { AccountTier } from "../pikpak/tier";
 
 export type RuntimeEvent = { type: string; id?: string; reason?: string; count?: number; bytes?: bigint; size?: bigint };
 export type ActiveTarget = { fileId: string; shareId: string };
 export type EngineOptions = { tier?: Pick<AccountTier, "refresh" | "cap"> };
-// 手动释放的预览：可释放的副本数、合计大小与其中未完成文件的副本数；不能释放时给出原因。
-export type ReleasePreview = { ok: true; copies: number; bytes: bigint; unfinished: number } | { ok: false; reason: string };
+// 手动释放的预览：可释放的副本数、合计大小、其中未完成文件的副本数，以及释放后会删除记录的已完成文件数；不能释放时给出原因。
+export type ReleasePreview = { ok: true; copies: number; bytes: bigint; unfinished: number; removed: number } | { ok: false; reason: string };
 type Delivery = (workspace: FileWorkspace, signal: AbortSignal) => Promise<void>;
 type PoolEntry = ActiveTarget & { controller: AbortController; done: Promise<void> };
 export class Engine {
@@ -78,24 +79,34 @@ export class Engine {
     this.cloudQueue = result.then(() => {}, () => {});
     return result;
   }
-  private releaseTargets(id: string): { targets: ReleaseTarget[]; reason: string | null } {
+  private releaseTargets(id: string): { targets: ReleaseTarget[]; orphans: string[]; reason: string | null } {
     const found = this.store.releaseTargets(this.drive.accountId, id);
-    const targets = found.targets.filter(target => target.fileIds.every(fileId => !this.pool.has(fileId) && fileId !== this.stepFile && !this.releasing.has(fileId)));
-    return { targets, reason: targets.length ? null : found.targets.length ? "copy_in_use" : found.reason ?? "copy_absent" };
+    const free = (fileId: string) => !this.pool.has(fileId) && fileId !== this.stepFile && !this.releasing.has(fileId);
+    const targets = found.targets.filter(target => target.fileIds.every(free)), orphans = found.orphans.filter(free);
+    const busy = found.targets.length + found.orphans.length > targets.length + orphans.length;
+    return { targets, orphans, reason: targets.length || orphans.length ? null : busy ? "copy_in_use" : found.reason ?? "copy_absent" };
   }
-  private preview({ targets, reason }: { targets: ReleaseTarget[]; reason: string | null }): ReleasePreview {
+  private preview({ targets, orphans, reason }: { targets: ReleaseTarget[]; orphans: string[]; reason: string | null }): ReleasePreview {
     if (reason) return { ok: false, reason };
-    return { ok: true, copies: targets.length, bytes: targets.reduce((sum, target) => sum + target.copy.size, 0n), unfinished: targets.filter(target => !target.completed).length };
+    return { ok: true, copies: targets.length, bytes: targets.reduce((sum, target) => sum + target.copy.size, 0n), unfinished: targets.filter(target => !target.completed).length,
+      removed: targets.filter(target => target.completed).reduce((sum, target) => sum + target.fileIds.length, 0) + orphans.length };
   }
   // 手动释放（add-task-controls 决策 4）：只读预览，供界面决定是否打开确认框。
   releasable(id: string): ReleasePreview { return this.preview(this.releaseTargets(id)); }
   // 开始释放并立即返回预览；删除与核对在云端操作锁内于后台进行，结果以事件报告。
   release(id: string, signal: AbortSignal): ReleasePreview {
     const found = this.releaseTargets(id), preview = this.preview(found); if (!preview.ok) return preview;
-    const targets = found.targets, fileIds = targets.flatMap(target => target.fileIds);
+    const { targets, orphans } = found, fileIds = [...targets.flatMap(target => target.fileIds), ...orphans];
+    const shareIds = [...new Set(fileIds.map(fileId => this.store.file(this.drive.accountId, fileId).shareId))];
     for (const fileId of fileIds) this.releasing.add(fileId);
     const done = this.exclusive(async () => {
       for (const target of targets) { if (signal.aborted) return; await this.releaseOne(target, signal); }
+      for (const fileId of orphans) {
+        // 先报告再删除：事件区按 ID 查名称，删除后就查不到了。检查与删除之间没有 await。
+        if (!this.store.forgettable(this.drive.accountId, fileId)) continue;
+        this.event({ type: "task_removed", id: fileId }); this.store.forgetFile(this.drive.accountId, fileId);
+      }
+      await this.forgetShares(shareIds);
     }).catch(() => {}).finally(() => {
       for (const fileId of fileIds) this.releasing.delete(fileId);
       this.releases.delete(done); this.event({ type: "release_finished" });
@@ -107,9 +118,13 @@ export class Engine {
     const id = target.fileIds[0]!;
     try {
       const result = await this.space.release(target.copy.id, id, signal);
-      if (result.outcome === "released") this.event({ type: "copy_released", id, bytes: target.copy.size });
-      else if (result.outcome === "missing") this.event({ type: "copy_missing", id });
-      else if (result.outcome === "changed") this.event({ type: "copy_release_skipped", id, reason: "copy_changed" });
+      if (result.outcome === "released" || result.outcome === "missing") {
+        // 已完成文件的副本释放后删除任务记录（add-task-controls 决策 7）；先报告再删除。
+        const remove = target.completed && target.fileIds.every(fileId => this.store.forgettable(this.drive.accountId, fileId));
+        this.event(result.outcome === "released" ? { type: "copy_released", id, bytes: target.copy.size, ...(remove ? { reason: "removed" } : {}) }
+          : { type: "copy_missing", id, ...(remove ? { reason: "removed" } : {}) });
+        if (remove) for (const fileId of target.fileIds) this.store.forgetFile(this.drive.accountId, fileId);
+      } else if (result.outcome === "changed") this.event({ type: "copy_release_skipped", id, reason: "copy_changed" });
       else if (result.outcome === "skipped") this.event({ type: "copy_release_skipped", id, reason: "copy_in_use" });
       else if (result.outcome === "denied") this.event({ type: "copy_release_denied", id, reason: result.reason });
       else this.event({ type: "attention", id, reason: "operation_needs_reconciliation" });
@@ -117,6 +132,15 @@ export class Engine {
       if (signal.aborted) return;
       const reason = error instanceof AppError ? error.code : error instanceof ProviderError && error.status === 429 ? "rate_limited" : "remote_request_failed";
       this.event({ type: "copy_release_failed", id, reason });
+    }
+  }
+  // 文件记录都已删除的分享随之删除，不再被引用的访问资料一并回收。
+  private async forgetShares(shareIds: string[]): Promise<void> {
+    for (const shareId of shareIds) {
+      if (!this.store.shareForgettable(this.drive.accountId, shareId)) continue;
+      this.event({ type: "share_removed", id: shareId });
+      const reference = this.store.forgetShare(this.drive.accountId, shareId);
+      if (reference) await collectShareAccess(this.store, this.secrets, reference).catch(() => false);
     }
   }
   // 等待后台释放在安全点结束（会话停止时信号已中断）。
