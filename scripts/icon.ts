@@ -2,8 +2,26 @@ import { deflateSync } from "node:zlib";
 
 // Windows 产物图标：参照 PikPak 的蓝底纸箱形象，改成像素风（呼应 README 的字符标志），
 // 箱面换成终端提示符 >_，右下角加 README 标志青色的下载角标。
-// 图案画在 24×24 网格上，按各尺寸超采样绘制后封装为内嵌 PNG 的 ICO，不依赖外部栅格化工具。
-const art = [
+// 小尺寸用 16×16 的简化图，大尺寸用 24×24 的图；每个尺寸选整数倍放大后余量最小的那张，
+// 网格对齐到整像素、余量用底色补齐，像素边缘保持锐利，只有圆角做抗锯齿。不依赖外部栅格化工具。
+const arts = [[
+  "................",
+  "................",
+  ".......WW.......",
+  "..WWWWWWWWWWWW..",
+  "..ssssssssssss..",
+  "..WWWWWWWWWWWW..",
+  "..WWFWWWWWWWWW..",
+  "..WWWFWWWWWWWW..",
+  "..WWWWFWWWWWWW..",
+  "..WWWFWWWWWDDD..",
+  "..WWFWWFFFDDCDD.",
+  "..WWWWWWWWDDCDD.",
+  "..WWWWWWWWDCCCD.",
+  "..WWWWWWWWDDCDD.",
+  "...........DDD..",
+  "................",
+], [
   "........................",
   "........................",
   "........................",
@@ -28,29 +46,38 @@ const art = [
   "................DDDCDDD.",
   ".................DDDDD..",
   "........................",
-];
+]];
 const palette: Record<string, readonly [number, number, number]> = {
   ".": [0x30, 0x6e, 0xff], F: [0x30, 0x6e, 0xff], W: [0xff, 0xff, 0xff], s: [0xc8, 0xd8, 0xff],
   D: [0x16, 0x17, 0x1f], C: [0x5c, 0xcf, 0xe6],
 };
-const grid = art.length;
-const sizes = [16, 24, 32, 48, 64, 128, 256];
+// 含 Windows 在 100%–200% 缩放下用到的小图标、大图标与超大图标尺寸。
+const sizes = [16, 20, 24, 32, 40, 48, 64, 72, 96, 128, 256];
+
+function layout(size: number) {
+  const fits = arts.map(art => {
+    const cell = Math.floor(size / art.length);
+    return { art, cell, offset: Math.floor((size - cell * art.length) / 2), spare: (size - cell * art.length) / size };
+  }).filter(fit => fit.cell > 0);
+  // 余量不超过 1/8 时优先用细节更多的大图，否则取余量最小的。
+  return fits.filter(fit => fit.spare <= 0.125).at(-1) ?? fits.reduce((best, fit) => fit.spare < best.spare ? fit : best);
+}
 
 function render(size: number): Uint8Array {
+  const { art, cell, offset } = layout(size);
   const radius = size * 0.2;
   const samples = 4;
   const pixels = new Uint8Array(size * size * 4);
   for (let py = 0; py < size; py++) for (let px = 0; px < size; px++) {
-    let r = 0, g = 0, b = 0, a = 0;
+    const row = art[Math.floor((py - offset) / cell)], key = row?.[Math.floor((px - offset) / cell)] ?? ".";
+    const [r, g, b] = palette[key]!;
+    let covered = 0;
     for (let sy = 0; sy < samples; sy++) for (let sx = 0; sx < samples; sx++) {
       const u = px + (sx + 0.5) / samples, v = py + (sy + 0.5) / samples;
       const dx = Math.max(radius - u, 0, u - (size - radius)), dy = Math.max(radius - v, 0, v - (size - radius));
-      if (dx * dx + dy * dy > radius * radius) continue;
-      const [cr, cg, cb] = palette[art[Math.floor(v / size * grid)]![Math.floor(u / size * grid)]!]!;
-      r += cr; g += cg; b += cb; a++;
+      if (dx * dx + dy * dy <= radius * radius) covered++;
     }
-    const at = (py * size + px) * 4;
-    if (a) pixels.set([Math.round(r / a), Math.round(g / a), Math.round(b / a), Math.round(a / samples ** 2 * 255)], at);
+    if (covered) pixels.set([r, g, b, Math.round(covered / samples ** 2 * 255)], (py * size + px) * 4);
   }
   return pixels;
 }
@@ -95,4 +122,38 @@ export function iconIco(): Uint8Array {
     offset += image.length;
   });
   return Buffer.concat([directory, ...images]);
+}
+
+// Bun 1.4.2 写入图标时只替换 RT_ICON 并新增编号为 0 的图标组，原有的命名图标组 IDI_MYICON 仍在且排在前面，
+// 资源管理器优先读它：它只声明一个 256px 条目，指向现在的 16px 图像，于是大图标被拉伸发糊、小图标沿用缓存。
+// 把每个图标组的数据项都指向本工具写入的完整图标组；只改资源目录中的 RVA 与长度，不改变节的大小与布局。
+export function repointIconGroups(exe: Uint8Array): number {
+  const view = new DataView(exe.buffer, exe.byteOffset, exe.byteLength);
+  const pe = view.getUint32(0x3c, true);
+  const optional = pe + 24, optionalSize = view.getUint16(pe + 20, true);
+  const directories = optional + (view.getUint16(optional, true) === 0x20b ? 112 : 96);
+  const resourceRva = view.getUint32(directories + 2 * 8, true);
+  let base = -1, delta = 0;
+  for (let index = 0; index < view.getUint16(pe + 6, true); index++) {
+    const section = optional + optionalSize + index * 40;
+    const va = view.getUint32(section + 12, true), raw = view.getUint32(section + 20, true);
+    if (resourceRva >= va && resourceRva < va + Math.max(view.getUint32(section + 8, true), view.getUint32(section + 16, true))) {
+      base = raw + resourceRva - va;
+      delta = va - raw;
+    }
+  }
+  if (base < 0) throw Error("产物中找不到资源节");
+  const entries = (at: number) => Array.from({ length: view.getUint16(at + 12, true) + view.getUint16(at + 14, true) }, (_, index) => ({
+    id: view.getUint32(at + 16 + index * 8, true), target: base + (view.getUint32(at + 20 + index * 8, true) & 0x7fffffff),
+  }));
+  const groupType = entries(base).find(entry => entry.id === 14);
+  if (!groupType) throw Error("产物中找不到图标组");
+  const leaves = entries(groupType.target).flatMap(name => entries(name.target).map(language => language.target));
+  const ours = leaves.find(leaf => view.getUint16(view.getUint32(leaf, true) - delta + 4, true) === sizes.length);
+  if (ours === undefined) throw Error("产物中找不到本工具写入的图标组");
+  for (const leaf of leaves) {
+    view.setUint32(leaf, view.getUint32(ours, true), true);
+    view.setUint32(leaf + 4, view.getUint32(ours + 4, true), true);
+  }
+  return leaves.length;
 }
