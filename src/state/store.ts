@@ -23,6 +23,8 @@ export type Operation = { id: string; accountId: string; fileId: string; kind: "
 export type CopyRecord = { id: string; remoteId: string; parentId: string; size: bigint; gcid: string; ownership: "unverified" | "created";
   state: "retained" | "deleting" | "deleted" | "protected"; operationId: string; evidence: CreationEvidence | null };
 export type ReclaimCandidate = CopyRecord & { fileId: string; completedAt: bigint };
+// 手动释放的对象：一份保留中的副本与引用它的文件；completed 表示这些文件都已完成。
+export type ReleaseTarget = { copy: CopyRecord; fileIds: string[]; completed: boolean };
 export type Delivery = { fileId: string; tempPath: string; targetPath: string; checkpoint: bigint; prefixSha256: string | null;
   publishAttempt: bigint; volume: string | null; identity: string | null; sha256: string | null; verification: string | null; completedAt: bigint | null;
   ranges: RangeCheckpoint | null };
@@ -385,6 +387,47 @@ export class Store {
       AND c.state IN ('retained','deleting') AND EXISTS(SELECT 1 FROM copy_references WHERE copy_id=c.id)
       AND NOT EXISTS(SELECT 1 FROM copy_references r JOIN files f ON f.id=r.file_id LEFT JOIN deliveries d ON d.file_id=f.id
         WHERE r.copy_id=c.id AND (f.state<>'completed' OR d.completed_at IS NULL))`, copyId, accountId);
+  }
+  // 手动释放（add-task-controls 决策 4）：本工具创建、保留中的副本；引用它的文件都不在落盘中，也没有未核对的转存或发布。
+  canRelease(accountId: string, copyId: string): boolean {
+    return !!this.get(`SELECT c.id FROM copies c WHERE c.id=? AND c.account_id=? AND c.ownership='created' AND c.evidence_json IS NOT NULL
+      AND c.state='retained' AND EXISTS(SELECT 1 FROM copy_references WHERE copy_id=c.id)
+      AND NOT EXISTS(SELECT 1 FROM copy_references r JOIN files f ON f.id=r.file_id WHERE r.copy_id=c.id AND (f.state='publishing'
+        OR EXISTS(SELECT 1 FROM operations o WHERE o.file_id=f.id AND o.status<>'confirmed' AND o.kind<>'delete')))`, copyId, accountId);
+  }
+  // 文件或分享中保留着的副本；没有可释放的副本时给出原因（正在使用优先于非本工具创建，最后是没有副本）。
+  releaseTargets(accountId: string, id: string): { targets: ReleaseTarget[]; reason: string | null } {
+    const shareScope = id.startsWith("s_");
+    if (shareScope) this.share(accountId, id); else this.file(accountId, id);
+    const rows = this.all<{ id: string }>(`SELECT DISTINCT c.id FROM copies c JOIN copy_references r ON r.copy_id=c.id JOIN files f ON f.id=r.file_id
+      WHERE c.account_id=? AND c.state='retained' AND ${shareScope ? "f.share_id=?" : "f.id=?"} ORDER BY c.id`, accountId, id);
+    const targets: ReleaseTarget[] = []; let notOwned = false, busy = false;
+    for (const row of rows) {
+      const copy = this.copy(accountId, row.id);
+      if (copy.ownership !== "created" || !copy.evidence) { notOwned = true; continue; }
+      if (!this.canRelease(accountId, copy.id)) { busy = true; continue; }
+      const files = this.all<{ id: string; state: FileState }>("SELECT f.id,f.state FROM copy_references r JOIN files f ON f.id=r.file_id WHERE r.copy_id=? ORDER BY f.rowid", copy.id);
+      targets.push({ copy, fileIds: files.map(file => file.id), completed: files.every(file => file.state === "completed") });
+    }
+    return { targets, reason: targets.length ? null : busy ? "copy_in_use" : notOwned ? "copy_not_owned" : "copy_absent" };
+  }
+  // 副本已发出删除（deleting）或已确认不在云盘中（deleted）：引用它的未完成文件改回就绪、保留断点，下次执行时重新转存。
+  // 已校验完成、只差落盘的文件不需要副本，保持原状态。
+  releaseCopy(accountId: string, copyId: string, state: "deleting" | "deleted", operationId?: string): void {
+    this.transaction(() => {
+      if (operationId) this.updateOperation(accountId, operationId, { payload: { sent: true } });
+      this.copyState(accountId, copyId, state);
+      this.run(`UPDATE files SET state='ready' WHERE account_id=? AND id IN (SELECT file_id FROM copy_references WHERE copy_id=?)
+        AND state IN ('saving','awaiting_remote','downloading','verifying','reconciling')
+        AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.file_id=files.id AND d.sha256 IS NOT NULL)`, accountId, copyId);
+    });
+  }
+  // 服务端明确拒绝删除：删除没有发生，副本恢复为保留中，删除意图记为已确认、结果为被拒绝。
+  releaseDenied(accountId: string, operationId: string, copyId: string): void {
+    this.transaction(() => {
+      this.copyState(accountId, copyId, "retained");
+      this.updateOperation(accountId, operationId, { status: "confirmed", payload: { outcome: "denied" } });
+    });
   }
   submitted(accountId: string, operationId: string, taskId: string): void {
     const result = this.run("UPDATE operations SET status='submitted',task_id=? WHERE id=? AND account_id=? AND status='intent'", taskId, operationId, accountId);

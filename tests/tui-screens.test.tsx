@@ -317,3 +317,36 @@ test("p 暂停或继续选中的文件或分享，P 在有暂停时全部开始�
   await press(keys.up, "p"); expect(controller.commands.at(-1)).toEqual({ kind: "resumeTask", id: "s_1" });
 });
 
+test("x 释放云端副本：已完成与未完成文件的确认文字、分享范围、详情页；没有合格副本时只说明原因", async () => {
+  const controller = new FakeController();
+  const { frame, press } = mount(controller); await settle();
+  expect(frame()).toContain("x 释放"); expect(frame()).toContain("q 退出");
+  await press("x");
+  expect(controller.previews).toEqual(["f_1"]);
+  expect(frame()).toContain("释放云端副本"); expect(frame()).toContain("释放 episode01.mkv 的云端副本（412 MB）？");
+  expect(frame()).toContain("不进回收站"); expect(frame()).not.toContain("重新转存");
+  await press("n"); expect(frame()).not.toContain("释放云端副本"); expect(controller.commands).toEqual([]);
+  await press("x", "y"); expect(controller.commands.at(-1)).toEqual({ kind: "releaseCopy", id: "f_1" });
+
+  controller.release = { ok: true, copies: 1, bytes: 412n * 1048576n, unfinished: 1 };
+  await press(keys.down, "x");
+  expect(frame()).toContain("释放 episode02.mkv 的云端副本"); expect(frame()).toContain("继续时从分享重新转存"); expect(frame()).toContain("分享失效将无法完成");
+  await press(keys.escape);
+
+  controller.release = { ok: true, copies: 2, bytes: 824n * 1048576n, unfinished: 0 };
+  await press(keys.up, keys.up, "x");
+  expect(frame()).toContain("释放「某某合集」中 2 个云端副本（824 MB）？");
+  await press("y"); expect(controller.commands.at(-1)).toEqual({ kind: "releaseCopy", id: "s_1" });
+
+  controller.release = { ok: false, reason: "copy_absent" };
+  const before = controller.commands.length;
+  await press(keys.down, "x");
+  expect(frame()).not.toContain("释放云端副本"); expect(controller.commands).toHaveLength(before);
+  expect(controller.notes.at(-1)?.text).toBe("episode01.mkv：没有可释放的云端副本");
+
+  // 详情页：x 打开同样的确认框，确认后回到详情页。
+  controller.release = { ok: true, copies: 1, bytes: 412n * 1048576n, unfinished: 0 };
+  await press(keys.enter); expect(frame()).toContain("x 释放云端副本");
+  await press("x"); expect(frame()).toContain("确认释放");
+  await press("y"); expect(controller.commands.at(-1)).toEqual({ kind: "releaseCopy", id: "f_1" }); expect(frame()).toContain("x 释放云端副本");
+});

@@ -268,3 +268,18 @@ test("单项暂停：暂停当前执行项先中断步骤；暂停与继续其�
   } finally { abort.abort(); await running; await f.close(); }
 });
 
+test("释放云端副本：命令立即返回并在事件中报告副本数；没有合格副本时报告原因；预览只读", async () => {
+  const f = await storeFixture();
+  try {
+    const fake = fakeEngine(async () => false); const signals: AbortSignal[] = [];
+    fake.engine.release = (id, signal) => { signals.push(signal); return id === f.first.id ? { ok: true, copies: 2, bytes: 20n, unfinished: 1 } : { ok: false, reason: "copy_absent" }; };
+    fake.engine.releasable = () => ({ ok: false, reason: "copy_in_use" });
+    const session = new RuntimeSession(f.store, "account", fake.engine, f.receiver, fakeClipboard().clipboard);
+    const events: RuntimeEvent[] = []; session.subscribe(event => events.push(event));
+    expect(await session.command({ kind: "releaseCopy", id: f.first.id })).toEqual({ ok: true, ids: [], issues: [] });
+    expect(await session.command({ kind: "releaseCopy", id: f.second.id })).toEqual({ ok: false, reason: "copy_absent" });
+    expect(events).toEqual([{ type: "command", reason: "releaseCopy", id: f.first.id, count: 2 }, { type: "command_failed", reason: "copy_absent", id: f.second.id }]);
+    expect(signals.every(signal => !signal.aborted)).toBe(true);
+    expect(session.releasable(f.first.id)).toEqual({ ok: false, reason: "copy_in_use" });
+  } finally { await f.close(); }
+});

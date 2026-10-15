@@ -1,6 +1,7 @@
 import type { FileState } from "../../src/state/model";
 import type { FileView, ShareView } from "../../src/state/store";
 import type { CommandResult, SessionCommand } from "../../src/runtime/session";
+import type { ReleasePreview } from "../../src/runtime/engine";
 import { pastePreview, type OpenResult, type TuiController, type TuiSnapshot } from "../../src/tui/controller";
 import type { LogLine } from "../../src/tui/view-model";
 
@@ -50,6 +51,8 @@ export class FakeController implements TuiController {
   stops = 0; forced = 0;
   result: CommandResult = { ok: true, ids: [], issues: [] };
   openResult: OpenResult = { ok: true };
+  release: ReleasePreview = { ok: true, copies: 1, bytes: 412n * 1048576n, unfinished: 0 };
+  readonly previews: string[] = [];
   constructor(snapshot: TuiSnapshot = mockSnapshot()) { this.current = snapshot; }
   snapshot = () => this.current;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -59,6 +62,7 @@ export class FakeController implements TuiController {
   preview = (text: string) => pastePreview(text);
   targetPath = (fileId: string) => fileId === "f_4" ? "C:\\Users\\demo\\Downloads\\PikPak-Test\\纪录片合集\\part1.mp4" : null;
   openDirectory = async (target: { shareId: string; fileId?: string }) => { this.opened.push(target); return this.openResult; };
+  releasePreview = (id: string) => { this.previews.push(id); return this.release; };
   stop = () => { this.stops++; };
   forceExit = () => { this.forced++; };
 }

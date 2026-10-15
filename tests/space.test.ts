@@ -13,7 +13,7 @@ import type { CreationEvidence } from "../src/pikpak/ownership";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "pikpak-space-test-")); const path = join(root, "db.sqlite"), store = new Store(path);
   store.ensureAccount("account"); const share = store.accept("account", "share", root, "reference"); const scan = store.claimScan("account", share.id)!;
-  const state = { limit: 100n, usage: 90n, delayed: false, lost: false, denied: false, deletions: [] as string[], files: new Map<string, Record<string, unknown>>() };
+  const state = { limit: 100n, usage: 90n, delayed: false, lost: false, denied: false, quietDenied: false, quiet: [] as boolean[], deletions: [] as string[], files: new Map<string, Record<string, unknown>>() };
   const add = (remoteId: string, completed: boolean, owned: boolean, size = 40n, completedAt = 1) => {
     const file = store.mergeFile(scan, { sourceId: `source-${remoteId}`, size, gcid: "a".repeat(40), relativePath: "synthetic" });
     const operation = store.beginOperation("account", file.id, "restore"); store.submitted("account", operation, `task-${remoteId}`);
@@ -33,10 +33,12 @@ async function fixture() {
     }
     return { file, copyId };
   };
-  const api: Pick<PikpakClient, "request"> = { request: async (_, route, init = {}, before) => {
+  const api: Pick<PikpakClient, "request"> = { request: async (_, route, init = {}, before, options = {}) => {
     if (route.endsWith("/about")) return { quota: { limit: state.limit.toString(), usage: state.usage.toString() } };
     if (route === "/drive/v1/files:batchDelete") {
-      before?.(); const ids = JSON.parse(String(init.body)).ids;
+      before?.(); const ids = JSON.parse(String(init.body)).ids; state.quiet.push(!!options.quiet);
+      // 静默请求的拒绝只抛给调用者，不暂停账号（与 PikpakClient 的 quiet 选项一致）。
+      if (state.quietDenied && options.quiet) throw new ProviderError("delete", "permission_denied", 403);
       if (state.denied) { store.pause("account", "permission"); throw new ProviderError("delete", "permission_denied", 403); }
       expect(ids).toHaveLength(1); const id = ids[0] as string;
       const file = state.files.get(id); if (!file) throw Error("cannot-delete-unregistered-resource");
@@ -123,3 +125,62 @@ test("权限拒绝停止删除；已不可读的旧候选不按名称替代", as
     expect(missing.store.copy("account", first.copyId).state).toBe("protected");
   } finally { await missing.close(); }
 });
+
+test("手动释放：静默删除；服务端拒绝时副本保留、意图记为被拒绝、账号不暂停", async () => {
+  const f = await fixture();
+  try {
+    const done = f.add("done", true, true);
+    expect(f.store.releaseTargets("account", done.file.id)).toMatchObject({ reason: null, targets: [{ fileIds: [done.file.id], completed: true }] });
+    f.state.quietDenied = true;
+    expect(await f.manager.release(done.copyId, done.file.id)).toEqual({ outcome: "denied", reason: "permission_denied" });
+    expect(f.store.copy("account", done.copyId).state).toBe("retained"); expect(f.store.paused("account")).toBe(null);
+    expect(f.store.unresolved("account")).toEqual([]); expect(f.state.deletions).toEqual([]);
+    f.state.quietDenied = false;
+    expect(await f.manager.release(done.copyId, done.file.id)).toEqual({ outcome: "released" });
+    expect(f.state.deletions).toEqual(["done"]); expect(f.state.quiet).toEqual([true, true]);
+    expect(f.store.copy("account", done.copyId).state).toBe("deleted"); expect(f.store.unresolved("account")).toEqual([]);
+    // 释放后自动回收不再把它当作候选。
+    expect(f.store.candidates("account")).toEqual([]);
+  } finally { await f.close(); }
+});
+
+test("手动释放：未完成文件改回就绪并保留断点；非本工具创建、有未核对转存或没有副本时不释放", async () => {
+  const f = await fixture();
+  try {
+    const unfinished = f.add("unfinished", false, true);
+    f.store.allocateDelivery("account", unfinished.file.id, join(f.root, "unfinished.part"), join(f.root, "unfinished.bin"));
+    f.store.transition("account", unfinished.file.id, "ready"); f.store.transition("account", unfinished.file.id, "downloading");
+    f.store.checkpoint("account", unfinished.file.id, 20n, "b".repeat(64)); f.store.pauseTask("account", unfinished.file.id);
+    expect(f.store.releaseTargets("account", unfinished.file.id).targets[0]?.completed).toBe(false);
+    expect(await f.manager.release(unfinished.copyId, unfinished.file.id)).toEqual({ outcome: "released" });
+    const after = f.store.file("account", unfinished.file.id);
+    expect(after.state).toBe("ready"); expect(after.retries).toBe(0n); expect(f.store.persistedBytes("account", unfinished.file.id)).toBe(20n);
+    expect(f.store.copyForFile("account", unfinished.file.id)).toBe(null);
+
+    const unowned = f.add("unowned", true, false);
+    expect(f.store.releaseTargets("account", unowned.file.id)).toEqual({ targets: [], reason: "copy_not_owned" });
+    expect(await f.manager.release(unowned.copyId, unowned.file.id)).toEqual({ outcome: "skipped" });
+    const busy = f.add("busy", false, true); f.store.beginOperation("account", busy.file.id, "restore");
+    expect(f.store.releaseTargets("account", busy.file.id)).toEqual({ targets: [], reason: "copy_in_use" });
+    const none = f.store.mergeFile(f.scan, { sourceId: "never-saved", size: 5n, gcid: "a".repeat(40), relativePath: "synthetic" });
+    expect(f.store.releaseTargets("account", none.id)).toEqual({ targets: [], reason: "copy_absent" });
+    // 分享范围：只列出可释放的副本；不能释放的不影响其他副本。
+    expect(f.store.releaseTargets("account", f.share.id)).toEqual({ targets: [], reason: "copy_in_use" });
+    const other = f.add("other", true, true);
+    expect(f.store.releaseTargets("account", f.share.id).targets.map(target => target.copy.id)).toEqual([other.copyId]);
+    expect(f.state.deletions).toEqual(["unfinished"]);
+  } finally { await f.close(); }
+});
+
+test("手动释放：副本已被改动时改为受保护、已不存在时记为已删除，均不发出删除", async () => {
+  const f = await fixture();
+  try {
+    const moved = f.add("moved", true, true); f.state.files.get("moved")!.parent_id = "user-location";
+    expect(await f.manager.release(moved.copyId, moved.file.id)).toEqual({ outcome: "changed" });
+    expect(f.store.copy("account", moved.copyId).state).toBe("protected");
+    const gone = f.add("gone", true, true); f.state.files.delete("gone");
+    expect(await f.manager.release(gone.copyId, gone.file.id)).toEqual({ outcome: "missing" });
+    expect(f.store.copy("account", gone.copyId).state).toBe("deleted"); expect(f.state.deletions).toEqual([]);
+  } finally { await f.close(); }
+});
+

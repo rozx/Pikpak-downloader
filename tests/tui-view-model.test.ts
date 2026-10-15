@@ -73,3 +73,16 @@ test("事件区描述使用名称而非内部 ID，进度事件不进入事件�
   expect(describeEvent({ type: "progress", id: "f_1", bytes: 1n, size: 2n }, names)).toBe(null);
   expect(describeEvent({ type: "completed", id: "f_unknown" }, names)?.text).toContain("f_unknown");
 });
+
+test("释放云端副本的事件描述：已释放、已不存在、未释放、被拒绝、失败与命令", () => {
+  const names = { share: (id: string) => id === "s_1" ? "某某合集" : null, file: (id: string) => id === "f_1" ? "episode01.mkv" : null };
+  expect(describeEvent({ type: "copy_released", id: "f_1", bytes: 412n * 1048576n }, names)).toEqual({ icon: "♻", tone: "done", text: "episode01.mkv 的云端副本已释放（412 MB）" });
+  expect(describeEvent({ type: "copy_missing", id: "f_1" }, names)?.text).toBe("episode01.mkv 的云端副本已不在云盘中，记录已更新");
+  expect(describeEvent({ type: "copy_release_skipped", id: "f_1", reason: "copy_changed" }, names)?.text).toBe("episode01.mkv 的云端副本未释放：云端副本已被改动，已改为受保护，不会删除");
+  expect(describeEvent({ type: "copy_release_denied", id: "f_1", reason: "permission_denied" }, names)).toEqual({ icon: "✗", tone: "error",
+    text: "episode01.mkv 的云端副本未能释放：PikPak 拒绝了删除请求，副本保留（permission_denied）" });
+  expect(describeEvent({ type: "copy_release_denied", id: "f_1", reason: "has space" }, names)?.text).toBe("episode01.mkv 的云端副本未能释放：PikPak 拒绝了删除请求，副本保留");
+  expect(describeEvent({ type: "copy_release_failed", id: "f_1", reason: "rate_limited" }, names)?.text).toBe("episode01.mkv 的云端副本释放失败：请求过于频繁，PikPak 暂时限流");
+  expect(describeEvent({ type: "command", reason: "releaseCopy", id: "s_1", count: 2 }, names)?.text).toBe("正在释放 分享「某某合集」 的 2 个云端副本");
+  for (const reason of ["copy_absent", "copy_in_use", "copy_not_owned", "copy_changed", "release_denied"]) expect(explain(reason).reason).not.toContain("未知原因");
+});

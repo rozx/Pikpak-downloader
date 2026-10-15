@@ -6,7 +6,7 @@ import type { Store } from "../state/store";
 import type { ClipboardSnapshot } from "../platform/types";
 import type { IntakeReceiver, IntakeResult } from "../intake/receiver";
 import { pollClipboard, type Clipboard } from "../intake/clipboard";
-import type { Engine, RuntimeEvent } from "./engine";
+import type { Engine, ReleasePreview, RuntimeEvent } from "./engine";
 import { saveConnections } from "../download/connections";
 import { saveActiveFiles } from "./active-files";
 
@@ -15,11 +15,11 @@ export type SessionCommand =
   | { kind: "pauseQueue" } | { kind: "resumeQueue" }
   | { kind: "submitText"; text: string } | { kind: "setOutputRoot"; path: string }
   | { kind: "setClipboardWatch"; enabled: boolean } | { kind: "setDownloadConnections"; count: number } | { kind: "setActiveFiles"; count: number }
-  | { kind: "pauseTask"; id: string } | { kind: "resumeTask"; id: string } | { kind: "startAll" };
+  | { kind: "pauseTask"; id: string } | { kind: "resumeTask"; id: string } | { kind: "startAll" } | { kind: "releaseCopy"; id: string };
 export type CommandResult = { ok: true; ids: string[]; issues: string[] } | { ok: false; reason: string };
 // stopActive / isPooled 对应下载池（add-concurrent-file-downloads）；只有串行执行器的测试替身可以不提供。
 export type SessionEngine = Pick<Engine, "step" | "resumeLocalPause" | "resumeTrafficPause" | "reconcile" | "blockPersistence" | "subscribe">
-  & Partial<Pick<Engine, "stopActive" | "isPooled">>;
+  & Partial<Pick<Engine, "stopActive" | "isPooled" | "releasable" | "release" | "settleReleases">>;
 type Pending = { command: SessionCommand; resolve: (result: CommandResult) => void };
 
 // 与 config --output 相同的目录校验：存在、是目录、可写可进入。
@@ -75,7 +75,10 @@ export class RuntimeSession {
     const halt = new AbortController(); this.halt = halt;
     const combined = AbortSignal.any([signal, halt.signal]); this.running = combined;
     // 下载池空出名额时唤醒空闲等待，下一个文件尽快开始。
-    const unsubscribe = this.engine.subscribe(event => { this.track(event); this.emit(event); if (event.type === "released") this.wake?.(); });
+    // 手动释放结束后，被排除的文件可以重新调度。
+    const unsubscribe = this.engine.subscribe(event => {
+      this.track(event); this.emit(event); if (event.type === "released" || event.type === "release_finished") this.wake?.();
+    });
     const watching = this.watching();
     if (watching) this.startIntake();
     this.emit({ type: "started", ...(watching ? {} : { reason: "clipboard_off" }) });
@@ -95,11 +98,18 @@ export class RuntimeSession {
       }
     } finally {
       // 中断时下载池中的文件各自在安全点停止并保存检查点。
-      halt.abort(); this.wake?.(); await this.engine.stopActive?.().catch(() => {}); await this.stopIntake(); unsubscribe();
+      halt.abort(); this.wake?.(); await this.engine.stopActive?.().catch(() => {}); await this.engine.settleReleases?.().catch(() => {});
+      await this.stopIntake(); unsubscribe();
       this.stopped = true; this.running = null;
       for (const item of this.pending.splice(0)) item.resolve({ ok: false, reason: "stopped" });
       this.emit({ type: "stopped" });
     }
+  }
+
+  // 手动释放的预览（只读）：界面据此决定打开确认框还是说明原因。
+  releasable(id: string): ReleasePreview {
+    try { return this.engine.releasable?.(id) ?? { ok: false, reason: "copy_absent" }; }
+    catch (error) { return { ok: false, reason: error instanceof AppError ? error.code : "operation_failed" }; }
   }
 
   private track(event: RuntimeEvent): void {
@@ -126,7 +136,7 @@ export class RuntimeSession {
     const account = this.accountId;
     const id = "id" in command ? { id: command.id } : {};
     try {
-      let result: CommandResult = { ok: true, ids: [], issues: [] };
+      let result: CommandResult = { ok: true, ids: [], issues: [] }, count: number | undefined;
       if (command.kind === "retry") this.store.retry(account, command.id);
       else if (command.kind === "cancel") {
         // 先写取消标记，调度不再选这些文件；再停下下载池中的目标（或该分享的文件），其他在途文件继续。
@@ -143,7 +153,12 @@ export class RuntimeSession {
       else if (command.kind === "setOutputRoot") {
         const root = await writableDirectory(command.path);
         this.store.setConfig("output_root", root); this.receiver.setOutputRoot(root);
-        result = { ok: true, ids: this.store.moveUnstartedShares(account, root), issues: [] };
+        result = { ok: true, ids: this.store.moveUnstartedShares(account, root), issues: [] }; count = result.ids.length;
+      } else if (command.kind === "releaseCopy") {
+        // 立即返回：删除与核对在后台进行，结果由引擎事件报告；会话停止时随运行信号中断。
+        const started = this.engine.release?.(command.id, this.running ?? new AbortController().signal) ?? { ok: false, reason: "copy_absent" };
+        if (!started.ok) { this.emit({ type: "command_failed", reason: started.reason, ...id }); return started; }
+        count = started.copies;
       } else if (command.kind === "setDownloadConnections") saveConnections(this.store, command.count);
       else if (command.kind === "setActiveFiles") saveActiveFiles(this.store, command.count);
       else if (command.kind === "setClipboardWatch") {
@@ -154,7 +169,7 @@ export class RuntimeSession {
         this.report(intake);
         result = intake.failure ? { ok: false, reason: intake.failure } : { ok: true, ids: intake.ids, issues: intake.issues };
       }
-      this.emit({ type: "command", reason: command.kind, ...id, ...(command.kind === "setOutputRoot" && result.ok ? { count: result.ids.length } : {}) });
+      this.emit({ type: "command", reason: command.kind, ...id, ...(count === undefined ? {} : { count }) });
       return result;
     } catch (error) {
       const reason = error instanceof AppError ? error.code : "operation_failed";

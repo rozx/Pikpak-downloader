@@ -1,7 +1,7 @@
 import { AppError } from "../errors";
 import type { SecretStore } from "../platform/types";
 import type { LocalFileSystem } from "../platform/files";
-import type { FileRecord, Store } from "../state/store";
+import type { FileRecord, ReleaseTarget, Store } from "../state/store";
 import { Drive, definitelyMissing } from "../pikpak/drive";
 import { Restore } from "../pikpak/restore";
 import { SpaceManager } from "../pikpak/space";
@@ -18,6 +18,8 @@ import type { AccountTier } from "../pikpak/tier";
 export type RuntimeEvent = { type: string; id?: string; reason?: string; count?: number; bytes?: bigint; size?: bigint };
 export type ActiveTarget = { fileId: string; shareId: string };
 export type EngineOptions = { tier?: Pick<AccountTier, "refresh" | "cap"> };
+// 手动释放的预览：可释放的副本数、合计大小与其中未完成文件的副本数；不能释放时给出原因。
+export type ReleasePreview = { ok: true; copies: number; bytes: bigint; unfinished: number } | { ok: false; reason: string };
 type Delivery = (workspace: FileWorkspace, signal: AbortSignal) => Promise<void>;
 type PoolEntry = ActiveTarget & { controller: AbortController; done: Promise<void> };
 export class Engine {
@@ -32,6 +34,13 @@ export class Engine {
   // 分段下载因限流降低后的并发，按账号在本次运行内记住，下一个文件从这个值开始（不持久化）。
   private readonly concurrency = new Map<string, number>();
   private readonly listeners = new Set<(event: RuntimeEvent) => void>();
+  // 当前串行步骤正在处理的文件；手动释放不处理它。
+  private stepFile: string | null = null;
+  // 正在手动释放副本的文件：调度不选它们，释放完成后才能重新转存。
+  private readonly releasing = new Set<string>();
+  private readonly releases = new Set<Promise<void>>();
+  // 云端操作锁（add-task-controls 决策 4）：自动回收与手动释放依次执行，不会同时为同一份副本发出删除。
+  private cloudQueue: Promise<unknown> = Promise.resolve();
   constructor(private readonly store: Store, private readonly secrets: SecretStore, private readonly drive: Drive,
     private readonly filesystem: LocalFileSystem, private readonly report: (event: RuntimeEvent) => void = () => {},
     private readonly http?: DownloadTransport,
@@ -64,6 +73,54 @@ export class Engine {
     await Promise.allSettled(entries.map(entry => entry.done));
   }
   blockPersistence(): void { this.pause("database"); }
+  private exclusive<T>(action: () => Promise<T>): Promise<T> {
+    const result = this.cloudQueue.then(action);
+    this.cloudQueue = result.then(() => {}, () => {});
+    return result;
+  }
+  private releaseTargets(id: string): { targets: ReleaseTarget[]; reason: string | null } {
+    const found = this.store.releaseTargets(this.drive.accountId, id);
+    const targets = found.targets.filter(target => target.fileIds.every(fileId => !this.pool.has(fileId) && fileId !== this.stepFile && !this.releasing.has(fileId)));
+    return { targets, reason: targets.length ? null : found.targets.length ? "copy_in_use" : found.reason ?? "copy_absent" };
+  }
+  private preview({ targets, reason }: { targets: ReleaseTarget[]; reason: string | null }): ReleasePreview {
+    if (reason) return { ok: false, reason };
+    return { ok: true, copies: targets.length, bytes: targets.reduce((sum, target) => sum + target.copy.size, 0n), unfinished: targets.filter(target => !target.completed).length };
+  }
+  // 手动释放（add-task-controls 决策 4）：只读预览，供界面决定是否打开确认框。
+  releasable(id: string): ReleasePreview { return this.preview(this.releaseTargets(id)); }
+  // 开始释放并立即返回预览；删除与核对在云端操作锁内于后台进行，结果以事件报告。
+  release(id: string, signal: AbortSignal): ReleasePreview {
+    const found = this.releaseTargets(id), preview = this.preview(found); if (!preview.ok) return preview;
+    const targets = found.targets, fileIds = targets.flatMap(target => target.fileIds);
+    for (const fileId of fileIds) this.releasing.add(fileId);
+    const done = this.exclusive(async () => {
+      for (const target of targets) { if (signal.aborted) return; await this.releaseOne(target, signal); }
+    }).catch(() => {}).finally(() => {
+      for (const fileId of fileIds) this.releasing.delete(fileId);
+      this.releases.delete(done); this.event({ type: "release_finished" });
+    });
+    this.releases.add(done);
+    return preview;
+  }
+  private async releaseOne(target: ReleaseTarget, signal: AbortSignal): Promise<void> {
+    const id = target.fileIds[0]!;
+    try {
+      const result = await this.space.release(target.copy.id, id, signal);
+      if (result.outcome === "released") this.event({ type: "copy_released", id, bytes: target.copy.size });
+      else if (result.outcome === "missing") this.event({ type: "copy_missing", id });
+      else if (result.outcome === "changed") this.event({ type: "copy_release_skipped", id, reason: "copy_changed" });
+      else if (result.outcome === "skipped") this.event({ type: "copy_release_skipped", id, reason: "copy_in_use" });
+      else if (result.outcome === "denied") this.event({ type: "copy_release_denied", id, reason: result.reason });
+      else this.event({ type: "attention", id, reason: "operation_needs_reconciliation" });
+    } catch (error) {
+      if (signal.aborted) return;
+      const reason = error instanceof AppError ? error.code : error instanceof ProviderError && error.status === 429 ? "rate_limited" : "remote_request_failed";
+      this.event({ type: "copy_release_failed", id, reason });
+    }
+  }
+  // 等待后台释放在安全点结束（会话停止时信号已中断）。
+  async settleReleases(): Promise<void> { await Promise.allSettled([...this.releases]); }
   private async local(file: FileRecord): Promise<FileWorkspace> {
     try { return await FileWorkspace.open(this.store, this.drive.accountId, file.shareId, this.filesystem); }
     catch (error) { this.pause("target_unavailable", file.id); throw error; }
@@ -113,7 +170,7 @@ export class Engine {
         if (operation.kind === "restore") {
           if (!operation.payload.sent) this.store.updateOperation(this.drive.accountId, operation.id, { status: "confirmed", payload: { outcome: "not_submitted" } });
           else await this.restore.ensure(file, signal);
-        } else if (operation.kind === "delete") await this.space.reconcile(operation, 0n, signal);
+        } else if (operation.kind === "delete") await this.exclusive(() => this.space.reconcile(operation, 0n, signal));
         else {
           workspace = await FileWorkspace.open(this.store, this.drive.accountId, file.shareId, this.filesystem);
           if (!await reconcilePublication(this.store, this.drive.accountId, file, workspace, signal) && !file.cancelled && !this.store.share(this.drive.accountId, file.shareId).cancelled) {
@@ -130,12 +187,15 @@ export class Engine {
     }
   }
   async step(signal: AbortSignal): Promise<boolean> {
+    try { return await this.stepOnce(signal); } finally { this.stepFile = null; }
+  }
+  private async stepOnce(signal: AbortSignal): Promise<boolean> {
     const account = this.drive.accountId;
     // 用户暂停与系统暂停分开记录，任一存在都不调度新的扫描、转存、下载或回收；对已发出操作的核对不受影响。
     if (signal.aborted || this.blocked || this.store.paused(account) || this.store.config("queue_paused") === "1" || this.store.rateLimited(account)) return false;
     await this.options.tier?.refresh(signal);
     // 没有空余名额时不选新文件，但仍可以扫描。
-    const capacity = this.capacity(), room = this.pool.size < capacity, busy = [...this.pool.keys()];
+    const capacity = this.capacity(), room = this.pool.size < capacity, busy = [...this.pool.keys(), ...this.releasing];
     const preferred = this.preferFile && room ? this.store.nextFile(account, Date.now(), busy) : null;
     const scan = preferred ? null : this.store.nextScan(account);
     if (scan) {
@@ -160,7 +220,7 @@ export class Engine {
     if (!room) return false;
     let file = preferred ?? this.store.nextFile(account, Date.now(), busy);
     if (!file) return false;
-    this.preferFile = false;
+    this.preferFile = false; this.stepFile = file.id;
     const accessReference = this.store.operationFor(account, file.id, "restore")?.secretRef ?? this.store.share(account, file.shareId).secretRef;
     // 串行部分：占用名额、检查已有副本、本地空间预检、空间计划与转存。下载、校验与发布交给 delivery。
     let delivery: Delivery | null = null;
@@ -201,7 +261,7 @@ export class Engine {
           const previous = this.store.operationFor(account, file.id, "restore");
           if (!previous?.payload.sent) {
             await this.restore.checkSource(file, signal);
-            const space = await this.space.ensure(file.size, signal);
+            const needed = file.size, space = await this.exclusive(() => this.space.ensure(needed, signal));
             if (space === "too_large") { this.store.fileError(account, file.id, "file_exceeds_cloud_capacity"); return true; }
             if (space !== "ready") { this.store.waitForSpace(account, file.id); this.event({ type: "waiting_space", id: file.id, reason: space }); return true; }
           }

@@ -2,7 +2,7 @@ import type { FileState, Pause, PauseReason } from "../state/model";
 import type { FileView, ShareView } from "../state/store";
 import type { RuntimeEvent } from "../runtime/engine";
 import type { Tone } from "./theme";
-import { displayPath, fileName } from "./format";
+import { displayPath, fileName, formatBytes } from "./format";
 
 // active：执行器正在处理该状态的文件，界面以动态图标表示。
 export type Look = { icon: string; tone: Tone; label: string; active?: boolean };
@@ -56,6 +56,11 @@ const reasons: Record<string, Explanation> = {
   state_unavailable: { reason: "任务库不可用", advice: "检查状态目录的权限和磁盘空间后重启程序。" },
   stopped: { reason: "程序正在停止", advice: "重新启动后再操作。" },
   operation_failed: { reason: "操作失败", advice: "按 r 重试。" },
+  copy_absent: { reason: "没有可释放的云端副本", advice: "该任务在云盘中没有本工具保留的副本。" },
+  copy_in_use: { reason: "云端副本正在使用", advice: "先按 p 暂停或等它完成，再释放。" },
+  copy_not_owned: { reason: "云端副本不是本工具创建的，不会删除", advice: "如需清理，请在 PikPak 中手动处理。" },
+  copy_changed: { reason: "云端副本已被改动，已改为受保护，不会删除", advice: "如需清理，请在 PikPak 中手动处理。" },
+  release_denied: { reason: "PikPak 拒绝了删除请求，副本保留", advice: "当前授权可能没有永久删除权限；可在 PikPak 中手动删除。" },
 };
 const aliases: Record<string, string> = { share_access_required: "access_required", waiting_space: "cloud_space",
   operation_needs_reconciliation: "needs_reconciliation", login_required: "authorization_failed", database: "state_unavailable", credentials: "credentials_unavailable" };
@@ -158,6 +163,11 @@ export function describeEvent(event: RuntimeEvent, names: NameLookup): LogLine |
     case "paused": return { icon: "⏸", tone: "warning", text: `执行已暂停：${pauses[event.reason as PauseReason]?.reason ?? explain(event.reason ?? null).reason}` };
     case "attention": return { icon: "✗", tone: "error", text: `${file(event.id)} 需要核对：${explain(event.reason ?? null).reason}` };
     case "file_waiting": return { icon: "!", tone: "warning", text: `${file(event.id)}：${explain(event.reason ?? null).reason}` };
+    case "copy_released": return { icon: "♻", tone: "done", text: `${file(event.id)} 的云端副本已释放${event.bytes ? `（${formatBytes(event.bytes)}）` : ""}` };
+    case "copy_missing": return { icon: "♻", tone: "muted", text: `${file(event.id)} 的云端副本已不在云盘中，记录已更新` };
+    case "copy_release_skipped": return { icon: "!", tone: "warning", text: `${file(event.id)} 的云端副本未释放：${explain(event.reason ?? null).reason}` };
+    case "copy_release_denied": return { icon: "✗", tone: "error", text: `${file(event.id)} 的云端副本未能释放：${explain("release_denied").reason}${event.reason && /^[a-z0-9_-]{1,64}$/i.test(event.reason) ? `（${event.reason}）` : ""}` };
+    case "copy_release_failed": return { icon: "✗", tone: "error", text: `${file(event.id)} 的云端副本释放失败：${explain(event.reason ?? null).reason}` };
     case "command": {
       const kind = event.reason;
       if (kind === "retry") return { icon: "↻", tone: "active", text: `已安排重试 ${target(event.id)}` };
@@ -165,6 +175,7 @@ export function describeEvent(event: RuntimeEvent, names: NameLookup): LogLine |
       if (kind === "pauseTask") return { icon: "⏸", tone: "warning", text: `已暂停 ${target(event.id)}` };
       if (kind === "resumeTask") return { icon: "▶", tone: "active", text: `已继续 ${target(event.id)}` };
       if (kind === "startAll") return { icon: "▶", tone: "active", text: "全部开始" };
+      if (kind === "releaseCopy") return { icon: "♻", tone: "active", text: `正在释放 ${target(event.id)} 的 ${event.count ?? 0} 个云端副本` };
       if (kind === "pauseQueue") return { icon: "⏸", tone: "warning", text: "队列已暂停" };
       if (kind === "resumeQueue") return { icon: "▶", tone: "active", text: "队列已继续" };
       if (kind === "setOutputRoot") return { icon: "●", tone: "done", text: event.count

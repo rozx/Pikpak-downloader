@@ -1,6 +1,7 @@
 import type { Pause } from "../state/model";
 import type { FileView, ShareView } from "../state/store";
 import type { CommandResult, SessionCommand } from "../runtime/session";
+import type { ReleasePreview } from "../runtime/engine";
 import { parseShares } from "../intake/parse";
 import type { LogLine } from "./view-model";
 import type { Tier } from "../pikpak/tier";
@@ -26,6 +27,8 @@ export interface TuiController {
   note(line: LogLine): void;
   preview(text: string): PastePreview;
   targetPath(fileId: string): string | null;
+  // 手动释放云端副本的预览（文件或分享）。
+  releasePreview(id: string): ReleasePreview;
   openDirectory(target: { shareId: string; fileId?: string }): Promise<OpenResult>;
   stop(): void;
   forceExit(): void;

@@ -36,7 +36,7 @@ export function DetailPage({ file, shareTitle, targetPath, userPaused, size, the
         ))}
       </Box>
       <Rule width={size.columns - 2} theme={theme} />
-      <Keys items={[["r", "重试"], ["c", "取消"], ["o", "打开目录"], ["Esc", "返回"]]} theme={theme} />
+      <Keys items={[["r", "重试"], ["c", "取消"], ["x", "释放云端副本"], ["o", "打开目录"], ["Esc", "返回"]]} theme={theme} />
     </Box>
   );
 }

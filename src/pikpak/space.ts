@@ -1,10 +1,12 @@
 import type { Operation, ReclaimCandidate, Store } from "../state/store";
 import { AppError } from "../errors";
-import { Drive } from "./drive";
+import { Drive, definitelyMissing } from "./drive";
 import { ProviderError } from "./protocol";
 import { unchangedOwnedCopy } from "./ownership";
 
 export type SpaceResult = "ready" | "waiting_space" | "waiting_sync" | "too_large";
+// 手动释放一份副本的结果：已释放、已不在云盘中、已被改动（改为保护）、被服务端拒绝、已发出但尚未确认、资格已失效。
+export type ReleaseOutcome = { outcome: "released" | "missing" | "changed" | "unconfirmed" | "skipped" } | { outcome: "denied"; reason: string };
 const absent = (error: unknown) => error instanceof ProviderError && error.status === 404 && ["not_found", "file_not_found"].includes(error.reason);
 
 export class SpaceManager {
@@ -78,6 +80,40 @@ export class SpaceManager {
       if (!await this.reconcile(this.store.operation(this.drive.accountId, operationId), needed, signal)) return "waiting_sync";
     }
     return (await this.drive.quota(signal)).free >= needed ? "ready" : "waiting_space";
+  }
+  // 手动释放（add-task-controls 决策 4）。调用者持有云端操作锁，自动回收不会同时删除同一份副本。
+  // 删除请求为静默模式：服务端明确拒绝（401 以外的 4xx）只影响这一次操作，不暂停账号、不记录账号限流。
+  async release(copyId: string, fileId: string, signal?: AbortSignal): Promise<ReleaseOutcome> {
+    const account = this.drive.accountId, copy = this.store.copy(account, copyId);
+    if (!copy.evidence || !this.store.canRelease(account, copyId)) return { outcome: "skipped" };
+    let metadata: Record<string, unknown>;
+    try { metadata = await this.drive.metadata(copy.remoteId, signal); }
+    catch (error) {
+      if (definitelyMissing(error)) { this.store.releaseCopy(account, copyId, "deleted"); return { outcome: "missing" }; }
+      throw error;
+    }
+    if (!unchangedOwnedCopy(copy.evidence, metadata)) { this.store.copyState(account, copyId, "protected"); return { outcome: "changed" }; }
+    const quota = await this.drive.quota(signal);
+    const operationId = this.store.beginOperation(account, fileId, "delete", {
+      copyId, freeBefore: quota.free.toString(), usageBefore: quota.usage.toString(), deadline: this.now() + 60000, sent: false, polls: 0,
+    });
+    try {
+      const result = await this.drive.api.request(account, "/drive/v1/files:batchDelete", {
+        ...(signal ? { signal } : {}), method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: [copy.remoteId] }),
+      }, () => {
+        if (!this.store.canRelease(account, copyId)) throw new AppError("needs_reconciliation");
+        this.store.releaseCopy(account, copyId, "deleting", operationId);
+      }, { quiet: true });
+      this.store.updateOperation(account, operationId, { status: "submitted", payload: { outcome: "delete_accepted" }, ...(typeof result.task_id === "string" ? { taskId: result.task_id } : {}) });
+    } catch (error) {
+      const operation = this.store.operation(account, operationId);
+      if (!operation.payload.sent) { this.store.updateOperation(account, operationId, { status: "confirmed", payload: { outcome: "not_submitted" } }); throw error; }
+      if (error instanceof ProviderError && error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 401) {
+        this.store.releaseDenied(account, operationId, copyId); return { outcome: "denied", reason: error.reason };
+      }
+      this.store.updateOperation(account, operationId, { status: "attention" }); throw error;
+    }
+    return await this.reconcile(this.store.operation(account, operationId), 0n, signal) ? { outcome: "released" } : { outcome: "unconfirmed" };
   }
   async reconcile(operation: Operation, needed = 0n, signal?: AbortSignal): Promise<boolean> {
     if (operation.kind !== "delete" || !operation.payload.copyId) throw new AppError("needs_reconciliation");

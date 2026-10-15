@@ -1,6 +1,6 @@
 import { dirname } from "node:path";
 import type { Store } from "../state/store";
-import type { RuntimeEvent } from "../runtime/engine";
+import type { ReleasePreview, RuntimeEvent } from "../runtime/engine";
 import type { CommandResult, RuntimeSession, SessionCommand } from "../runtime/session";
 import { pastePreview, type LogEntry, type OpenResult, type Progress, type TuiController, type TuiSnapshot } from "./controller";
 import { describeEvent, type LogLine } from "./view-model";
@@ -12,13 +12,13 @@ import { configuredActiveFiles } from "../runtime/active-files";
 import { tierCap, type Tier } from "../pikpak/tier";
 
 export type LiveOptions = {
-  store: Store; accountId: string; session: Pick<RuntimeSession, "subscribe" | "command">;
+  store: Store; accountId: string; session: Pick<RuntimeSession, "subscribe" | "command"> & Partial<Pick<RuntimeSession, "releasable">>;
   quota: () => Promise<{ usage: bigint; limit: bigint }>; localFree: () => Promise<bigint>;
   stop: () => void; forceExit: () => void; open?: (path: string) => Promise<OpenResult>; tier?: () => Tier;
   now?: () => number; snapshotMs?: number; flushMs?: number; quotaMs?: number; localMs?: number; maxEvents?: number;
 };
 // 这些事件前后会发生转存、回收或交付，云盘容量随之变化。
-const quotaEvents = new Set(["downloading", "completed", "waiting_space"]);
+const quotaEvents = new Set(["downloading", "completed", "waiting_space", "copy_released"]);
 
 // 真实控制器：快照每 500 ms 或收到事件时重建，但通知界面最多每 flushMs 一次；云盘容量与本地空间按各自周期刷新。
 export class LiveController implements TuiController {
@@ -68,6 +68,7 @@ export class LiveController implements TuiController {
   targetPath = (fileId: string): string | null => {
     try { return this.options.store.delivery(this.options.accountId, fileId)?.targetPath ?? null; } catch { return null; }
   };
+  releasePreview = (id: string): ReleasePreview => this.options.session.releasable?.(id) ?? { ok: false, reason: "copy_absent" };
   openDirectory = async (target: { shareId: string; fileId?: string }): Promise<OpenResult> => {
     const path = target.fileId ? this.targetPath(target.fileId) : null;
     let root: string;
