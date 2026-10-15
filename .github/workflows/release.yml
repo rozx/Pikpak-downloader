@@ -1,5 +1,6 @@
 # 合并到 main 的发布 PR 触发构建与发行：PR 须带 release 标签，且来源分支以 release/ 开头。
 # 版本号取合并提交中 package.json 的 version，标签为 v<version>；标签已存在时拒绝发布。
+# Release 正文取自 docs/releaseNotes/v<version>.md（由 release-ready 技能撰写），文件缺失时拒绝发布。
 name: Release
 
 on:
@@ -52,6 +53,11 @@ jobs:
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
             echo "::error::$tag 已存在，请先升级 package.json 的版本号"
+            exit 1
+          fi
+          notes="docs/releaseNotes/$tag.md"
+          if [[ ! -s "$notes" ]]; then
+            echo "::error::缺少发布说明 $notes"
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -110,6 +116,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      # 先检出发布说明，再下载产物，避免检出清空工作区。
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          sparse-checkout: docs/releaseNotes
+
       - uses: actions/download-artifact@v4
         with:
           pattern: binaries-*
@@ -133,4 +145,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$TARGET" \
             --title "$TAG" \
-            --generate-notes
+            --notes-file "docs/releaseNotes/$TAG.md"
