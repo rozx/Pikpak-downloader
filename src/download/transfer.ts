@@ -7,9 +7,8 @@ import { hashFile, publishVerified } from "./publish";
 import type { FileWorkspace } from "./workspace";
 import { retryAfter } from "../pikpak/protocol";
 
-export class DownloadError extends Error {
-  constructor(readonly code: "network_failure" | "range_mismatch" | "truncated_content" | "integrity_mismatch" | "version_changed" | "unsupported_download_url" | "url_refresh_exhausted" | "rate_limited" | "traffic_quota", readonly retryAfterMs?: number) { super(code); }
-}
+import { DownloadError } from "./download-error";
+export { DownloadError } from "./download-error";
 export type DownloadTransport = (url: string, init: RequestInit) => Promise<Response>;
 async function prefix(file: LocalFile, size: bigint, bytes: bigint, signal?: AbortSignal): Promise<ContentHasher> {
   const hash = new ContentHasher(size); let offset = 0n;
