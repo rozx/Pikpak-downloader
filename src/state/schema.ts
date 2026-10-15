@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const APPLICATION_ID = 0x504b444c;
 const scanProgressSchema = `
 CREATE TABLE scan_directories(scan_id TEXT NOT NULL REFERENCES scans(id), remote_id TEXT NOT NULL, path_json TEXT NOT NULL,
@@ -26,6 +26,8 @@ ALTER TABLE operations ADD COLUMN payload_json TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE copies ADD COLUMN evidence_json TEXT;
 ALTER TABLE deliveries ADD COLUMN plan_json TEXT NOT NULL DEFAULT '{}';
 ${localPathSchema}`;
+// 版本 4：分段下载检查点的区间与下载模式，见 src/state/ranges.ts。
+export const migrationFrom3 = "ALTER TABLE deliveries ADD COLUMN ranges_json TEXT;";
 export const schema = `
 CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
 INSERT INTO metadata VALUES('backup_review_required', '0');
@@ -85,7 +87,7 @@ CREATE TABLE deliveries(
   file_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, temp_path TEXT NOT NULL,
   target_path TEXT NOT NULL, publish_attempt INTEGER NOT NULL DEFAULT 0 CHECK(publish_attempt >= 0),
   file_volume TEXT, file_identity TEXT, checkpoint TEXT NOT NULL DEFAULT '0', prefix_sha256 TEXT,
-  sha256 TEXT, verification TEXT, completed_at INTEGER, plan_json TEXT NOT NULL DEFAULT '{}',
+  sha256 TEXT, verification TEXT, completed_at INTEGER, plan_json TEXT NOT NULL DEFAULT '{}', ranges_json TEXT,
   FOREIGN KEY(file_id,account_id) REFERENCES files(id,account_id)
 ) STRICT;
 CREATE TABLE pauses(

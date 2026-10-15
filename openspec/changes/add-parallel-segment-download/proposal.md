@@ -14,7 +14,7 @@
 - 服务端不支持 Range、文件不超过一个分块、或连接数配置为 1 时，回退到现有的单连接顺序路径。因 Range 异常而回退的文件会持久化记住顺序模式，直到用户显式 `retry`。
 - 实施前先做两项验证：真实 CDN 多连接的吞吐与限流行为（P1），以及 Windows 文件桥在窗口写入下的补零和吞吐（P2）。如果 P1 证明并发不能提升吞吐，就停止本变更，不改变默认行为。
 
-不包含：多个文件同时下载、跨文件的云端容量预留、多 CDN 节点选择、动态分块大小、文件预分配或稀疏文件等原生桥接改动、TUI 设置页里的连接数入口（界面已在 main 上，入口留作后续变更）。
+不包含：多个文件同时下载、跨文件的云端容量预留、多 CDN 节点选择、动态分块大小、文件预分配或稀疏文件等原生桥接改动。多个文件同时下载由单独的变更处理。
 
 ## Capabilities
 
@@ -29,7 +29,7 @@
 ## Impact
 
 - 依赖：`add-clipboard-download-workflow` 归档后本变更才能归档。本变更与 `add-interactive-tui` 没有规格重叠，但两者都会改 `src/runtime/engine.ts`；TUI 的执行器中断和进度事件改动已在 main（截至 `3111468`），本变更直接在其上实现。`download()` 的进度回调继续只报告合计字节数，不改变进度事件结构。
-- 代码：`src/download/transfer.ts`（调度器、地址租约、区间检查点、回退）；`src/download/gcid.ts`（算法不变，可能增加分块摘要辅助）；`src/state/schema.ts` 与 `src/state/store.ts`（结构版本 4、`deliveries.ranges_json` 列、`download_connections` 配置键）；`src/runtime/engine.ts`（传入连接数，并在单次运行内记住已降低的并发上限）；`src/cli.ts`（`config --connections <1-8>`）；`docs/downloads.md`。
+- 代码：`src/download/transfer.ts`（调度器、地址租约、区间检查点、回退）；`src/download/gcid.ts`（算法不变，可能增加分块摘要辅助）；`src/state/schema.ts` 与 `src/state/store.ts`（结构版本 4、`deliveries.ranges_json` 列、`download_connections` 配置键）；`src/runtime/engine.ts`（传入连接数，并在单次运行内记住已降低的并发上限）；`src/cli.ts`（`config --connections <1-8>`）；`src/runtime/session.ts` 与 `src/tui/`（设置页的连接数选项，经会话命令写入配置）；`docs/downloads.md`。
 - 平台：macOS 已经使用定位写入，无需改动。Windows 文件桥的调用本来就是串行的，不需要改 PowerShell/C# 桥接代码，但需要通过 P2 实测确认。
 - 外部服务：对 CDN 的并发连接默认增加到 4、最多 8；元数据请求维持在约每 30 秒一次，不随连接数增加。
 - 数据：升级任务库前沿用现有的备份规则；旧程序会拒绝写入结构版本 4 的任务库。

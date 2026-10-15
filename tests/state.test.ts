@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { Store } from "../src/state/store";
+import { SCHEMA_VERSION } from "../src/state/schema";
+import { readdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { aggregate, assertTransition } from "../src/state/model";
 
 const cleanups: Array<() => void> = [];
@@ -203,3 +206,45 @@ test("来源关联、保守副本归属和字节检查点持久化，路径分�
   try { expect(db.query<{ ownership: string }, [string]>("SELECT ownership FROM copies WHERE id=?").get(copy)?.ownership).toBe("unverified"); }
   finally { db.close(); }
 });
+
+function downloading(f: ReturnType<typeof fixture>) {
+  f.store.transition("account-a", f.file.id, "ready");
+  f.store.transition("account-a", f.file.id, "downloading");
+  f.store.allocateDelivery("account-a", f.file.id, "/fixed-output/tmp", "/fixed-output/final");
+}
+
+test("结构版本 3 升到 4：先备份，旧检查点作为连续前缀保留，区间列为空", () => {
+  const f = fixture(); downloading(f);
+  f.store.checkpoint("account-a", f.file.id, 9007199254740992n, "a".repeat(64));
+  f.store.close();
+  const legacy = new Database(f.path);
+  legacy.exec("ALTER TABLE deliveries DROP COLUMN ranges_json; PRAGMA user_version=3"); legacy.close();
+  const store = f.reopen();
+  expect(SCHEMA_VERSION).toBe(4);
+  expect(store.delivery("account-a", f.file.id)).toMatchObject({ checkpoint: 9007199254740992n, prefixSha256: "a".repeat(64) });
+  expect(readdirSync(dirname(f.path)).filter(name => name.includes("backup-v3") && name.endsWith(".sqlite"))).toHaveLength(1);
+  const db = new Database(f.path, { readonly: true });
+  try {
+    expect(Number(db.query("PRAGMA user_version").values()[0]![0])).toBe(4);
+    expect(db.query<{ ranges: string | null }, [string]>("SELECT ranges_json AS ranges FROM deliveries WHERE file_id=?").get(f.file.id)?.ranges).toBe(null);
+  } finally { db.close(); }
+});
+
+test("升级失败时整体回滚，版本号与数据保持不变；更高版本的任务库被拒绝", () => {
+  const f = fixture(); downloading(f);
+  f.store.checkpoint("account-a", f.file.id, 5n, "b".repeat(64));
+  f.store.close();
+  // 版本号标为 3 但已有该列：升级语句失败。
+  const broken = new Database(f.path); broken.exec("PRAGMA user_version=3"); broken.close();
+  expect(() => new Store(f.path)).toThrow();
+  const db = new Database(f.path, { readonly: true });
+  try {
+    expect(Number(db.query("PRAGMA user_version").values()[0]![0])).toBe(3);
+    expect(db.query<{ checkpoint: string }, [string]>("SELECT checkpoint FROM deliveries WHERE file_id=?").get(f.file.id)?.checkpoint).toBe("5");
+  } finally { db.close(); }
+  const newer = new Database(f.path); newer.exec(`PRAGMA user_version=${SCHEMA_VERSION + 1}`); newer.close();
+  expect(() => new Store(f.path)).toThrow("更新版本");
+  const restored = new Database(f.path); restored.exec(`PRAGMA user_version=${SCHEMA_VERSION}`); restored.close();
+  f.reopen();
+});
+

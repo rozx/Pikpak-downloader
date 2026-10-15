@@ -1,7 +1,7 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { AppError } from "../errors";
-import { APPLICATION_ID, SCHEMA_VERSION, schema, migrationFrom1, migrationFrom2 } from "./schema";
+import { APPLICATION_ID, SCHEMA_VERSION, schema, migrationFrom1, migrationFrom2, migrationFrom3 } from "./schema";
 import { migrationBackup } from "./migration-backup";
 import { aggregateCounts, assertTransition, canResume, type Counts, type FileState, type Pause, type PauseReason } from "./model";
 import type { FileIdentity } from "../platform/types";
@@ -53,12 +53,18 @@ export class Store {
         })();
       } else {
         if (this.scalar("PRAGMA application_id") !== BigInt(APPLICATION_ID)) throw new AppError("state_unavailable");
-        if (version === 1n || version === 2n) {
+        if (version >= 1n && version < BigInt(SCHEMA_VERSION)) {
           if (readOnly) throw new AppError("state_unavailable");
           if (this.get<{ value: string }>("SELECT value FROM metadata WHERE key='backup_review_required'")?.value !== "0") throw new AppError("backup_review_required");
           this.db.exec("PRAGMA synchronous=FULL");
           migrationBackup(this.db, path, version);
-          this.db.transaction(() => { if (version === 1n) this.db.exec(migrationFrom1); this.db.exec(migrationFrom2); this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`); })();
+          // 逐级升级在同一事务中完成，任一步失败都整体回滚，版本号保持不变。
+          this.db.transaction(() => {
+            if (version <= 1n) this.db.exec(migrationFrom1);
+            if (version <= 2n) this.db.exec(migrationFrom2);
+            if (version <= 3n) this.db.exec(migrationFrom3);
+            this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
+          })();
         } else if (version !== BigInt(SCHEMA_VERSION)) throw new AppError("state_unavailable");
       }
       if (!readOnly && this.get<{ value: string }>("SELECT value FROM metadata WHERE key='backup_review_required'")?.value !== "0") {
