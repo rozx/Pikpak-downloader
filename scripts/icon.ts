@@ -103,10 +103,30 @@ function png(size: number, pixels: Uint8Array): Uint8Array {
     chunk("IHDR", header), chunk("IDAT", deflateSync(rows)), chunk("IEND", new Uint8Array())]);
 }
 
-export const iconPng = (size: number) => png(size, render(size));
+// 小于 256px 的尺寸用传统的 32 位 BMP（自下而上的 BGRA 加 1 位透明掩码），兼容所有读取图标的系统接口；
+// 只有 256px 用 PNG，这是 Windows 对图标格式的通行做法。
+function bitmap(size: number, pixels: Uint8Array): Uint8Array {
+  const stride = Math.ceil(size / 32) * 4;
+  const out = new Uint8Array(40 + size * size * 4 + stride * size);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, 40, true);
+  view.setInt32(4, size, true);
+  view.setInt32(8, size * 2, true);
+  view.setUint16(12, 1, true);
+  view.setUint16(14, 32, true);
+  view.setUint32(20, size * size * 4 + stride * size, true);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const from = ((size - 1 - y) * size + x) * 4, to = 40 + (y * size + x) * 4;
+    out.set([pixels[from + 2]!, pixels[from + 1]!, pixels[from]!, pixels[from + 3]!], to);
+    if (pixels[from + 3] === 0) out[40 + size * size * 4 + y * stride + (x >> 3)]! |= 0x80 >> (x & 7);
+  }
+  return out;
+}
+
+export const iconImage = (size: number) => (size >= 256 ? png : bitmap)(size, render(size));
 
 export function iconIco(): Uint8Array {
-  const images = sizes.map(iconPng);
+  const images = sizes.map(iconImage);
   const directory = new Uint8Array(6 + 16 * images.length);
   const view = new DataView(directory.buffer);
   view.setUint16(2, 1, true);
