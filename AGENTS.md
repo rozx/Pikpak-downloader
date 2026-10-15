@@ -17,10 +17,10 @@ bun test tests/tui-screens.test.tsx -t "全部释放"   # 按测试名过滤
 bun run dev                                    # 从源码运行并监视改动，保存后自动重启；无参数且在交互终端中时进入全屏界面
 bun run start --help                           # 从源码运行一次 CLI（src/cli.ts），不监视改动
 bun scripts/preview-tui.tsx                    # 用模拟数据预览全屏界面，不读写任务库
-bun run build bun-windows-x64                  # 单文件产物输出到 dist/；目标为 bun-{darwin,windows}-{arm64,x64}，默认取当前平台
+bun run build bun-windows-x64                  # 单文件产物输出到 dist/；目标为 bun-{darwin,windows,linux}-{arm64,x64}，默认取当前平台
 ```
 
-- `PIKPAK_DOWNLOADER_STATE_DIR` 用来另指任务库与锁所在的目录，测试与本地试验时使用。默认目录：macOS 为 `~/Library/Application Support/PikpakDownloader`，Windows 为 `%LOCALAPPDATA%\PikpakDownloader`。
+- `PIKPAK_DOWNLOADER_STATE_DIR` 用来另指任务库与锁所在的目录，测试与本地试验时使用。默认目录：macOS 为 `~/Library/Application Support/PikpakDownloader`，Windows 为 `%LOCALAPPDATA%\PikpakDownloader`，Linux 为 `$XDG_DATA_HOME/PikpakDownloader`（未设置时为 `~/.local/share/PikpakDownloader`）。
 - 构建 macOS 原生模块（`native/macos.mm`）需要 Xcode Command Line Tools 与 Node-API 头文件，头文件目录可用 `NODE_API_HEADERS` 指定。
 
 ## 工作方式
@@ -91,7 +91,10 @@ bun run build bun-windows-x64                  # 单文件产物输出到 dist/�
 - `files.ts` 定义基于句柄的 `LocalDirectory` 与 `LocalFile` 接口。
   - macOS 使用由 `native/macos.mm` 编译的 Node-API 模块。
   - Windows 使用常驻的 PowerShell 桥（`windows-files.ps1` 加 `process-bridge.ts`）做句柄相对的目录操作；文件身份核对通过后，数据读写改走 node:fs 文件描述符。
-- 剪贴板与凭据也各有两平台实现。
+  - Linux 经 `bun:ffi` 直接调用 glibc（`linux-files.ts`：`openat`、`statx`、`renameat2(RENAME_NOREPLACE)`、`fstatfs`），语义与 macOS 相同。
+- 剪贴板与凭据按平台实现：
+  - 凭据在 macOS 与 Linux 上用 `Bun.secrets`（Keychain、Secret Service），Windows 用 PowerShell 脚本。
+  - Linux 剪贴板调用 `wl-paste`、`xclip` 或 `xsel`，序号在文本变化时自增。
 - 发行产物的入口是 `src/main.ts`：`Bun.build` 编译后入口模块的 `import.meta.main` 为 false，所以不能依赖 `cli.ts` 自身的入口判断。
 
 ### 界面（`tui/`）
@@ -103,9 +106,10 @@ bun run build bun-windows-x64                  # 单文件产物输出到 dist/�
 
 ## 测试
 
-- 涉及真实文件系统的测试用 `test.if(nativeFiles)` 标注，只在 macOS 与 Windows 上运行；Windows 上会启动 PowerShell 桥。
+- 涉及真实文件系统的测试用 `test.if(nativeFiles)` 标注，在 macOS、Windows 与 Linux 上运行；Windows 上会启动 PowerShell 桥。
 - 假 PikPak 服务有两处：
   - `tests/fixtures/engine.ts`：引擎与会话的端到端测试。
   - `tests/space.test.ts` 内的夹具：空间回收与释放。
 - 界面测试用 `tests/fixtures/tui.ts` 的 `FakeController` 配合 `ink-testing-library`，在固定窗口尺寸下断言帧文本。
 - 不要用 `expect(promise).rejects`：在 Windows 上，Bun 1.4.2 等待时会停止读取文件桥的输出，导致测试挂起。改用 `tests/fixtures/rejection.ts` 的 `rejection()`。
+- 在 Windows 上验证 Linux：`bun run build bun-linux-x64` 后把产物复制到 WSL，用 `BUN_BE_BUN=1 <产物> test tests` 把它当作 bun 运行测试。WSL 的墙钟会跳变，依赖 `Date.now()` 的等待（如 `until()`）可能偶发超时，以 CI 的 Ubuntu 结果为准。

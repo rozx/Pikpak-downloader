@@ -24,6 +24,6 @@ Windows 发行候选的对应命令如下，尚待 Windows 实测：
 
 Windows arm64 使用同目录的 `pikpak-downloader-windows-arm64.exe`。停止监听后可使用同样的 `retry`、`cancel`、`config` 和 `logout` 语义。
 
-macOS 使用本应用的 Keychain 条目。Windows 桥接通过系统 PowerShell 调用 Credential Manager 的 `CredWriteW`，明确指定 `CRED_PERSIST_LOCAL_MACHINE`，回读检查持久化标志及值。秘密只走进程管道，不进入命令行或普通文件；超过 2560 个 UTF-8 字节时拒绝保存，不退回明文。字段与限制依据 [Microsoft CREDENTIALW 文档](https://learn.microsoft.com/en-us/windows/win32/api/wincred/ns-wincred-credentialw)，实际平台验收仍是任务 8.3。
+macOS 使用本应用的 Keychain 条目。Linux 经 libsecret 使用 Secret Service（GNOME Keyring、KWallet 等）的同名条目，钥匙环需已解锁；没有可用服务（例如无图形会话的服务器）时报告凭据存储不可用，不退回明文。Windows 桥接通过系统 PowerShell 调用 Credential Manager 的 `CredWriteW`，明确指定 `CRED_PERSIST_LOCAL_MACHINE`，回读检查持久化标志及值。秘密只走进程管道，不进入命令行或普通文件；超过 2560 个 UTF-8 字节时拒绝保存，不退回明文。字段与限制依据 [Microsoft CREDENTIALW 文档](https://learn.microsoft.com/en-us/windows/win32/api/wincred/ns-wincred-credentialw)，实际平台验收仍是任务 8.3。
 
 系统凭据库不可用、被锁定、策略禁止桥接或数据超长时，解决该问题后重试。任务资料引用不可读时，需要重新复制含链接和提取码的完整文本；不会把它误判为分享永久失效，也不会自动取用另一个任务的资料。更新资料使用新的引用，活动扫描和未知操作用完旧引用后才可回收。

@@ -20,5 +20,5 @@
 
 ## 5. 文档与验收
 
-- [ ] 5.1 更新 README 与 `docs/login.md`：Linux 产物、依赖（Secret Service、`wl-paste`/`xclip`/`xsel`、`xdg-open`）与任务库位置。验收：`bun run check` 输出 0 fail，`openspec validate add-linux-support --strict` 通过。
+- [x] 5.1 更新 README 与 `docs/login.md`：Linux 产物、依赖（Secret Service、`wl-paste`/`xclip`/`xsel`、`xdg-open`）与任务库位置。验收：`bun run check` 输出 0 fail，`openspec validate add-linux-support --strict` 通过。
 - [ ] 5.2 Linux 桌面实机验收：登录、剪贴板监听、下载与发布。arm64 产物实机运行。验收：结果写入 `design.md`。

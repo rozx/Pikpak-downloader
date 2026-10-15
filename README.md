@@ -13,7 +13,7 @@ bun install --frozen-lockfile
 bun run check
 bun run dev                   # 从源码运行并监视改动，保存后自动重启
 bun run start --help          # 从源码运行一次，不监视改动
-bun run build bun-darwin-arm64 bun-windows-x64
+bun run build bun-darwin-arm64 bun-windows-x64 bun-linux-x64
 bun scripts/preview-tui.tsx   # 用模拟数据预览全屏界面，不读写任务库
 ```
 
@@ -61,9 +61,20 @@ macOS 原生构建需要 Xcode Command Line Tools 和 Node-API 头文件；可�
 
 将 `<任务ID>` 替换为终端给出的分享或文件任务 ID。运行中的 `status` 只读可用，其余写命令需先停止监听。再次复制同一分享可发现新增/变化版本；单独复制提取码不会与旧输入拼接。取消保留资源，已完成版本的历史回收资格保持不变。
 
+### Linux
+
+Linux 产物为 `pikpak-downloader-linux-x64` 与 `pikpak-downloader-linux-arm64`，需要 glibc 2.28 及以上，不支持 Alpine 等 musl 发行版。运行依赖：
+
+- 凭据：libsecret 与可用的 Secret Service（GNOME Keyring、KWallet 等），钥匙环需已解锁。没有可用服务时无法保存登录，程序不会改用明文。
+- 剪贴板：Wayland 会话需要 `wl-paste`（wl-clipboard），X11 会话需要 `xclip` 或 `xsel`。没有图形会话或缺少命令时界面显示监听异常，可按 a 粘贴分享文本。
+- 打开浏览器与下载目录：`xdg-open`。打不开时手动打开终端显示的本地入口。
+- 下载目录所在的文件系统需要支持不覆盖改名（ext4、xfs、btrfs 等）；不支持时发布失败并保留临时文件。
+
+任务库位于 `$XDG_DATA_HOME/PikpakDownloader`，未设置时位于 `~/.local/share/PikpakDownloader`。
+
 参见[登录](docs/login.md)、[分享文本](docs/clipboard.md)、[下载恢复](docs/downloads.md)和[云端回收](docs/cloud-space.md)。
 
-独立构建包含 Bun 运行时。Windows 构建成功不代表实际运行或原生适配通过；真实多页嵌套与完整故障场景、Windows/其他架构运行分别保留 OpenSpec 任务 8.2、8.3 的发布验收。
+独立构建包含 Bun 运行时。Windows 构建成功不代表实际运行或原生适配通过；Linux 的测试在 x64 上通过，桌面实机与 arm64 运行尚待验收；真实多页嵌套与完整故障场景、Windows/其他架构运行分别保留 OpenSpec 任务 8.2、8.3 的发布验收。
 
 状态与恢复边界见 [说明](docs/state-and-recovery.md)，脱敏可行性证据见 [设计](openspec/changes/archive/2026-10-15-add-clipboard-download-workflow/design.md)。
 
