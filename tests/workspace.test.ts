@@ -1,8 +1,8 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { safeName, foldedName } from "../src/download/names";
+import { safeName, foldedName, taskName } from "../src/download/names";
 import { FileWorkspace } from "../src/download/workspace";
 import { systemFiles } from "../src/platform/file-system";
 import type { LocalFileSystem } from "../src/platform/files";
@@ -101,3 +101,32 @@ test.if(nativeFiles)("打开工作区期间分享被迁移到新目录时，按�
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("任务名称去掉文件后缀：普通后缀、分卷后缀与双后缀；没有后缀或只有数字的点保持原样", () => {
+  expect(taskName("[DODO]26年10月作品 爱丽速子x曼城茶座.rar")).toBe("[DODO]26年10月作品 爱丽速子x曼城茶座");
+  expect(taskName("Shibarin.7z.002")).toBe("Shibarin"); expect(taskName("プチロマンス.7z.001")).toBe("プチロマンス");
+  expect(taskName("movie.part1.rar")).toBe("movie"); expect(taskName("backup.tar.gz")).toBe("backup"); expect(taskName("old.r00")).toBe("old");
+  expect(taskName("[GS_mel]26.10.14作品 绝区零 普罗米娅.rar")).toBe("[GS_mel]26.10.14作品 绝区零 普罗米娅");
+  expect(taskName("某某合集")).toBe("某某合集"); expect(taskName("Season 1.5")).toBe("Season 1.5"); expect(taskName(".rar")).toBe(".rar");
+  // 目录名不拆后缀：冲突编号加在末尾。
+  expect(safeName("[GS_mel]26.10.14作品", " (2)", 240, false)).toBe("[GS_mel]26.10.14作品 (2)");
+});
+
+test.if(nativeFiles)("任务目录用去掉后缀的任务名，重名时写作“名称 (2)”；临时文件放在目标旁边，不建 .pikpak-staging", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pikpak-workspace-layout-")); const store = new Store(join(root, "db.sqlite"));
+  let workspace: FileWorkspace | undefined;
+  try {
+    store.ensureAccount("account"); const share = store.accept("account", "share", root, "reference");
+    const scan = store.claimScan("account", share.id)!; store.captureTitle(scan, "Shibarin.7z.002");
+    await mkdir(join(root, "Shibarin")); // 用户已有同名目录：不写进去
+    const file = store.mergeFile(scan, { sourceId: "one", gcid: "a".repeat(40), size: 10n, relativePath: JSON.stringify([{ id: "one", name: "Shibarin.7z.001" }]) });
+    workspace = await FileWorkspace.open(store, "account", share.id, localFiles());
+    const plan = await workspace.prepare(file);
+    const delivery = store.delivery("account", file.id)!;
+    expect(delivery.targetPath).toBe(join(root, "Shibarin (2)", "Shibarin.7z.001"));
+    expect(delivery.tempPath).toBe(join(root, "Shibarin (2)", "Shibarin.7z.001.pikpak-part"));
+    expect(plan.tempParent).toBe(plan.parent);
+    const temp = await workspace.temporary(file); await temp.close();
+    expect((await readdir(join(root, "Shibarin (2)"))).sort()).toEqual(["Shibarin.7z.001.pikpak-part"]);
+    expect(await readdir(join(root, "Shibarin"))).toEqual([]);
+  } finally { await workspace?.close(); store.close(); await rm(root, { recursive: true, force: true }); }
+});

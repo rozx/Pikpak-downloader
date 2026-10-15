@@ -321,7 +321,7 @@ test("p 暂停或继续选中的文件或分享，P 在有暂停时全部开始�
 test("x 释放云端副本：已完成与未完成文件的确认文字、分享范围、详情页；没有合格副本时只说明原因", async () => {
   const controller = new FakeController();
   const { frame, press } = mount(controller); await settle();
-  expect(frame()).toContain("x 释放"); expect(frame()).toContain("q 退出");
+  expect(frame()).toContain("x/X 释放/全部"); expect(frame()).toContain("q 退出");
   await press("x");
   expect(controller.previews).toEqual(["f_1"]);
   expect(frame()).toContain("释放云端副本"); expect(frame()).toContain("释放 episode01.mkv 的云端副本（412 MB）？");
@@ -411,4 +411,21 @@ test("按本地下载目录分组：目录只在分组行显示一次；分组�
   // 向下越过分组行：从“另一个分享”直接到“纪录片合集”。
   await press(keys.down, keys.down, keys.down, keys.down, keys.down, "r");
   expect(controller.commands.at(-1)).toEqual({ kind: "retry", id: "s_2" });
+});
+
+test("X 全部释放：确认框说明只处理已完成的任务；没有可释放的内容时只说明原因；释放中的文件与分享显示释放中", async () => {
+  const controller = new FakeController();
+  const { frame, press } = mount(controller); await settle();
+  controller.release = { ok: true, copies: 5, bytes: 3n * 1073741824n, unfinished: 0, removed: 5 };
+  await press("X");
+  expect(controller.previews).toEqual(["*"]);
+  expect(frame()).toContain("释放全部已完成任务的 5 个云端副本（3.0 GB）？"); expect(frame()).toContain("未完成的任务不受影响");
+  await press("y"); expect(controller.commands.at(-1)).toEqual({ kind: "releaseAll" });
+  controller.release = { ok: true, copies: 0, bytes: 0n, unfinished: 0, removed: 2 };
+  await press("X"); expect(frame()).toContain("删除全部 2 个已完成任务的记录？"); await press("n");
+  controller.release = { ok: false, reason: "copy_absent" };
+  await press("X"); expect(frame()).not.toContain("释放云端副本"); expect(controller.notes.at(-1)?.text).toBe("全部释放：没有可释放的云端副本");
+  controller.update({ releasing: new Set(["f_1"]) }); await settle();
+  const line = (name: string) => frame().split("\n").find(item => item.includes(name)) ?? "";
+  expect(line("episode01.mkv")).toContain("释放中"); expect(line("「某某合集」")).toContain("· 1 释放中");
 });

@@ -3,7 +3,7 @@ import { AppError } from "../errors";
 import type { Store, FileRecord, SourceComponent, DeliveryPlan } from "../state/store";
 import type { LocalDirectory, LocalFile, LocalFileSystem } from "../platform/files";
 import { sameIdentity } from "../platform/files";
-import { safeName, foldedName, shortId, nodeId } from "./names";
+import { safeName, foldedName, shortId, nodeId, taskName } from "./names";
 
 export class FileWorkspace {
   private readonly opened = new Map<string, LocalDirectory>();
@@ -27,8 +27,9 @@ export class FileWorkspace {
     try {
       store.bindRoot(accountId, shareId, identity);
       workspace.opened.set("@root", root); workspace.paths.set("@root", share.outputRoot);
-      await workspace.ensure("@share", "@root", safeName(store.shareTitle(accountId, shareId) ?? "PikPak", `~${shortId(share.remoteId)}`));
-      await workspace.ensure("@temp", "@share", ".pikpak-staging");
+      // 任务目录用去掉后缀的任务名，只在与已有目录重名时写作“名称 (2)”（add-task-controls 决策 9）。
+      // 临时文件放在目标文件旁边，不再建 .pikpak-staging；旧计划里的 @temp 目录仍按记录打开。
+      await workspace.ensure("@share", "@root", taskName(store.shareTitle(accountId, shareId) ?? "PikPak"), true);
       return workspace;
     } catch (error) { const registered = workspace.opened.has("@root"); await workspace.close(); if (!registered) await root.close(); throw error; }
   }
@@ -37,12 +38,13 @@ export class FileWorkspace {
     const remaining = process.platform === "win32" ? 32760 - prefix.length - 1 : 1023 - Buffer.byteLength(prefix, "utf8") - 1;
     return Math.min(240, remaining);
   }
-  private async ensure(node: string, parent: string, suggested: string): Promise<LocalDirectory> {
+  private async ensure(node: string, parent: string, suggested: string, numbered = false): Promise<LocalDirectory> {
     const existing = this.store.directory(this.accountId, this.shareId, node);
     if (existing) return this.directory(node);
     const container = await this.directory(parent);
     for (let attempt = 0; attempt < 1000; attempt++) {
-      const name = safeName(suggested, attempt ? `~${shortId(node)}${attempt > 1 ? `-${attempt}` : ""}` : "", this.maxName(parent));
+      const name = numbered ? safeName(suggested, attempt ? ` (${attempt + 1})` : "", this.maxName(parent), false)
+        : safeName(suggested, attempt ? `~${shortId(node)}${attempt > 1 ? `-${attempt}` : ""}` : "", this.maxName(parent));
       if (this.store.directoryNameTaken(this.shareId, parent, foldedName(name))) continue;
       let child: LocalDirectory;
       try { child = await container.child(name, true); }
@@ -92,9 +94,10 @@ export class FileWorkspace {
       await this.ensure(node, parent, part.name); parent = node;
     }
     const baseName = parts.at(-1)!.name; const name = this.chooseName(file, parent, baseName);
-    const plan = { parent, name, tempParent: "@temp", tempName: `${file.id}.part`, baseName };
+    // 临时文件与目标同目录，下载完成后原地改名发布，不留下暂存目录。
+    const plan = { parent, name, tempParent: parent, tempName: `${name}.pikpak-part`, baseName };
     this.store.transaction(() => {
-      this.store.allocateDelivery(this.accountId, file.id, join(this.paths.get("@temp")!, plan.tempName), join(this.paths.get(parent)!, name));
+      this.store.allocateDelivery(this.accountId, file.id, join(this.paths.get(parent)!, plan.tempName), join(this.paths.get(parent)!, name));
       this.store.setDeliveryPlan(this.accountId, file.id, plan);
     });
     return plan;

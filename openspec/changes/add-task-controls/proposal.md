@@ -26,12 +26,13 @@
 ### Modified Capabilities
 
 - `transfer-queue`：单项暂停与恢复、全部开始；命令立即生效。
-- `cloud-space-reclamation`：用户手动释放云端副本。
-- `terminal-ui`：新按键 `p`（此项）、`P`（全部）与 `x`（释放云端副本），以及设置在运行中立即生效。
+- `cloud-space-reclamation`：用户手动释放云端副本与全部释放；已完成任务释放后删除记录。
+- `terminal-ui`：新按键 `p`（此项）、`P`（全部）、`x`（释放云端副本）与 `X`（全部释放），设置在运行中立即生效；任务位置图标、按下载目录分组、释放中状态、任务名称去掉后缀。
+- `share-downloads`：任务目录以去掉后缀的任务名称命名，临时文件放在目标旁边，不再建立暂存目录（2026-10-15 用户反馈后加入）。
 
 ## Impact
 
 - 代码：`src/state/schema.ts` 与 `src/state/store.ts`（结构版本 5：`files.paused`、`shares.paused`；暂停、恢复、手动释放的查询与写入）；`src/runtime/session.ts`（命令立即执行与中断规则）；`src/runtime/engine.ts`（跳过暂停项、云端操作锁、手动释放）；`src/pikpak/space.ts`（手动释放的删除与核对，静默请求）；`src/download/workspace.ts`（打开期间分享被改目录时按新目录重开）；`src/tui/`（按键、提示、确认框、状态显示）。
 - 数据：任务库结构升到 5，沿用升级前备份；旧程序拒绝写入。
-- 外部服务：手动释放会调用 `files:batchDelete`。目前不确定现有授权是否允许永久删除；不允许时功能只会提示原因。用户亲自执行这一操作，也就完成了此前一直未做的删除权限实测。
+- 外部服务：手动释放会调用 `files:batchDelete`。2026-10-15 用户实测确认现有授权允许永久删除（见 design.md）；服务端拒绝时功能只会提示原因。
 - 依赖：建立在 `add-interactive-tui`、`add-concurrent-file-downloads` 的会话与下载池之上。

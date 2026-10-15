@@ -51,6 +51,8 @@ test.if(nativeFiles)("暂停中的文件释放副本后改回就绪、保留断�
     step.abort(); expect(await running).toBe(false);
     f.store.pauseTask("account", file.id);
     expect(f.store.file("account", file.id).state).toBe("downloading");
+    // 全部释放只处理已完成的任务：暂停中的未完成文件不在其中。
+    expect(engine.releasable(null)).toEqual({ ok: false, reason: "copy_absent" });
     expect(engine.releasable(file.id)).toEqual({ ok: true, copies: 1, bytes: BigInt(3 * MiB), unfinished: 1, removed: 0 });
     expect(engine.release(file.id, new AbortController().signal)).toMatchObject({ ok: true, copies: 1 });
     // 释放进行中：同一文件不能再次释放。
@@ -154,5 +156,23 @@ test.if(nativeFiles)("释放后删除记录：已完成文件随副本删除；�
     expect(events.map(event => event.type).filter(type => ["copy_released", "share_removed"].includes(type))).toEqual(["copy_released", "share_removed"]);
     expect(f.store.shareViews("account")).toEqual([]); expect(await f.secrets.get(reference)).toBe(null);
     expect(() => engine.releasable(f.share.id)).toThrow();
+  } finally { await f.close(); }
+});
+
+test.if(nativeFiles)("全部释放：释放全部已完成任务的副本并删除记录，释放期间文件列为释放中；本地文件保留", async () => {
+  const f = await engineFixture(localFiles(), 2); f.state.limit = 1000n;
+  const { engine, events } = engineFor(f);
+  try {
+    const signal = new AbortController().signal;
+    for (let i = 0; i < 10 && f.store.summary("account", f.share.id).status !== "completed"; i++) await engine.step(signal);
+    const files = f.store.fileViews("account", f.share.id), targets = files.map(file => f.store.delivery("account", file.id)!.targetPath);
+    expect(engine.releasable(null)).toEqual({ ok: true, copies: 2, bytes: 80n, unfinished: 0, removed: 2 });
+    expect(engine.release(null, signal)).toMatchObject({ ok: true, copies: 2 });
+    expect(engine.releasingFiles().sort()).toEqual(files.map(file => file.id).sort());
+    await engine.settleReleases();
+    expect(engine.releasingFiles()).toEqual([]);
+    expect(f.state.deleted.sort()).toEqual(["copy-1", "copy-2"]); expect(events.filter(event => event.type === "copy_released")).toHaveLength(2);
+    expect(f.store.shareViews("account")).toEqual([]);
+    for (const [index, target] of targets.entries()) expect(await readFile(target)).toEqual(f.sources[index]!.bytes);
   } finally { await f.close(); }
 });

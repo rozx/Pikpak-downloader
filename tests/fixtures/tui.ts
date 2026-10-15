@@ -38,7 +38,7 @@ export function mockSnapshot(): TuiSnapshot {
     events: [{ at: Date.parse("2026-10-14T22:31:07"), icon: "⟳", tone: "scan", text: "「某某合集」扫描完成：3 个文件" },
       { at: Date.parse("2026-10-14T22:32:12"), icon: "✗", tone: "error", text: "part1.mp4 下载失败" },
       { at: Date.parse("2026-10-14T22:33:40"), icon: "✓", tone: "done", text: "episode01.mkv 校验通过，已完成" }],
-    outputRoot: "C:\\Users\\demo\\Downloads\\PikPak-Test", stopping: false, connections: 4, activeFiles: { configured: 1, effective: 1, tier: "paid" }, localMissing: new Set<string>(),
+    outputRoot: "C:\\Users\\demo\\Downloads\\PikPak-Test", stopping: false, connections: 4, activeFiles: { configured: 1, effective: 1, tier: "paid" }, localMissing: new Set<string>(), releasing: new Set<string>(),
   };
 }
 
@@ -62,7 +62,7 @@ export class FakeController implements TuiController {
   preview = (text: string) => pastePreview(text);
   targetPath = (fileId: string) => fileId === "f_4" ? "C:\\Users\\demo\\Downloads\\PikPak-Test\\纪录片合集\\part1.mp4" : null;
   openDirectory = async (target: { shareId: string; fileId?: string }) => { this.opened.push(target); return this.openResult; };
-  releasePreview = (id: string) => { this.previews.push(id); return this.release; };
+  releasePreview = (id: string | null) => { this.previews.push(id ?? "*"); return this.release; };
   stop = () => { this.stops++; };
   forceExit = () => { this.forced++; };
 }

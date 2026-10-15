@@ -79,12 +79,14 @@ export class Engine {
     this.cloudQueue = result.then(() => {}, () => {});
     return result;
   }
-  private releaseTargets(id: string): { targets: ReleaseTarget[]; orphans: string[]; reason: string | null } {
+  // id 为 null 表示全部释放：只处理已完成任务的副本与记录，未完成的任务不动（避免释放后立即重新转存）。
+  private releaseTargets(id: string | null): { targets: ReleaseTarget[]; orphans: string[]; reason: string | null } {
     const found = this.store.releaseTargets(this.drive.accountId, id);
     const free = (fileId: string) => !this.pool.has(fileId) && fileId !== this.stepFile && !this.releasing.has(fileId);
-    const targets = found.targets.filter(target => target.fileIds.every(free)), orphans = found.orphans.filter(free);
-    const busy = found.targets.length + found.orphans.length > targets.length + orphans.length;
-    return { targets, orphans, reason: targets.length || orphans.length ? null : busy ? "copy_in_use" : found.reason ?? "copy_absent" };
+    const candidates = id === null ? found.targets.filter(target => target.completed) : found.targets;
+    const targets = candidates.filter(target => target.fileIds.every(free)), orphans = found.orphans.filter(free);
+    const busy = candidates.length + found.orphans.length > targets.length + orphans.length;
+    return { targets, orphans, reason: targets.length || orphans.length ? null : busy ? "copy_in_use" : id === null ? "copy_absent" : found.reason ?? "copy_absent" };
   }
   private preview({ targets, orphans, reason }: { targets: ReleaseTarget[]; orphans: string[]; reason: string | null }): ReleasePreview {
     if (reason) return { ok: false, reason };
@@ -92,9 +94,9 @@ export class Engine {
       removed: targets.filter(target => target.completed).reduce((sum, target) => sum + target.fileIds.length, 0) + orphans.length };
   }
   // 手动释放（add-task-controls 决策 4）：只读预览，供界面决定是否打开确认框。
-  releasable(id: string): ReleasePreview { return this.preview(this.releaseTargets(id)); }
+  releasable(id: string | null): ReleasePreview { return this.preview(this.releaseTargets(id)); }
   // 开始释放并立即返回预览；删除与核对在云端操作锁内于后台进行，结果以事件报告。
-  release(id: string, signal: AbortSignal): ReleasePreview {
+  release(id: string | null, signal: AbortSignal): ReleasePreview {
     const found = this.releaseTargets(id), preview = this.preview(found); if (!preview.ok) return preview;
     const { targets, orphans } = found, fileIds = [...targets.flatMap(target => target.fileIds), ...orphans];
     const shareIds = [...new Set(fileIds.map(fileId => this.store.file(this.drive.accountId, fileId).shareId))];
@@ -143,6 +145,8 @@ export class Engine {
       if (reference) await collectShareAccess(this.store, this.secrets, reference).catch(() => false);
     }
   }
+  // 正在手动释放副本的文件（界面显示“释放中”）。
+  releasingFiles(): string[] { return [...this.releasing]; }
   // 等待后台释放在安全点结束（会话停止时信号已中断）。
   async settleReleases(): Promise<void> { await Promise.allSettled([...this.releases]); }
   private async local(file: FileRecord): Promise<FileWorkspace> {

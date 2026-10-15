@@ -32,7 +32,7 @@ function CountsText({ counts, theme, scanning, cancelled, paused, selected, fram
       <Text {...paint(counts.completed === counts.total && counts.total > 0 ? "done" : "text")}>  {counts.completed}/{counts.total} 完成</Text>
       {part(counts.downloading, "下载中", "active")}{part(counts.transferring, "转存中", "transfer")}{part(counts.paused, "暂停", "warning")}
       {part(counts.queued, "排队", "muted")}{part(counts.failed, "失败", "error")}{part(counts.waiting, "等待", "warning")}{part(counts.cancelled, "已取消", "muted")}
-      {part(counts.missing, "本地缺失", "warning")}
+      {part(counts.releasing, "释放中", "transfer")}{part(counts.missing, "本地缺失", "warning")}
       {cancelled && <Text {...paint("muted")}> · 分享已取消</Text>}
       {paused && !cancelled && <Text {...paint("warning")}> · 已暂停</Text>}
     </Text>

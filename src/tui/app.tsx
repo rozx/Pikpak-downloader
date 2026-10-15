@@ -19,7 +19,7 @@ function releaseDetail(preview: Extract<ReleasePreview, { ok: true }>): string {
 }
 
 type Screen = { kind: "main" } | { kind: "detail"; fileId: string } | { kind: "settings" } | { kind: "paste" }
-  | { kind: "confirm"; action: "cancel" | "release"; id: string; title: string; release?: Extract<ReleasePreview, { ok: true }>; back: Screen } | { kind: "quit" };
+  | { kind: "confirm"; action: "cancel" | "release" | "releaseAll"; id: string; title: string; release?: Extract<ReleasePreview, { ok: true }>; back: Screen } | { kind: "quit" };
 
 export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: { controller: TuiController; theme?: Theme; size?: Size }) {
   const windowSize = useWindowSize();
@@ -33,7 +33,7 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   const [pasteMessage, setPasteMessage] = useState<string | null>(null);
   const [setting, setSetting] = useState({ selected: 0, editing: false, error: null as string | null });
 
-  const rows = useMemo(() => buildRows({ shares: snapshot.shares, files: snapshot.files, expanded, userPaused: snapshot.userPaused, missing: snapshot.localMissing }), [snapshot, expanded]);
+  const rows = useMemo(() => buildRows({ shares: snapshot.shares, files: snapshot.files, expanded, userPaused: snapshot.userPaused, missing: snapshot.localMissing, releasing: snapshot.releasing }), [snapshot, expanded]);
   // 分组行不可选中：默认选第一个文件，没有文件时选第一个分享。
   const found = rows.findIndex(row => row.key === selectedKey && selectable(row));
   const firstFile = rows.findIndex(row => row.kind === "file");
@@ -82,6 +82,13 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
       : target.kind === "share" ? `释放${name}中 ${preview.copies} 个云端副本（${formatBytes(preview.bytes)}）？` : `释放 ${name} 的云端副本（${formatBytes(preview.bytes)}）？`;
     setScreen({ kind: "confirm", action: "release", id, title, release: preview, back });
   };
+  // 全部释放：只处理已完成的任务，未完成的任务不受影响。
+  const askReleaseAll = () => {
+    const preview = controller.releasePreview(null);
+    if (!preview.ok) { controller.note({ icon: "!", tone: "warning", text: `全部释放：${explain(preview.reason).reason}` }); return; }
+    const title = preview.copies ? `释放全部已完成任务的 ${preview.copies} 个云端副本（${formatBytes(preview.bytes)}）？` : `删除全部 ${preview.removed} 个已完成任务的记录？`;
+    setScreen({ kind: "confirm", action: "releaseAll", id: "*", title, release: preview, back: { kind: "main" } });
+  };
   const open = async (target: Row | undefined) => {
     if (!target) return;
     const result = await controller.openDirectory(target.kind === "share" ? { shareId: target.share.id } : { shareId: target.shareId, fileId: target.file.id });
@@ -113,6 +120,7 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
     } else if (input === "r" && row) void run({ kind: "retry", id: row.kind === "share" ? row.share.id : row.file.id });
     else if (input === "c") askCancel(row, { kind: "main" });
     else if (input === "x") askRelease(row, { kind: "main" });
+    else if (input === "X") askReleaseAll();
     else if (input === "p" && row) {
       // 选中项暂停或继续；文件自己未暂停但所属分享暂停时，继续该分享。
       const share = snapshot.shares.find(item => item.id === (row.kind === "share" ? row.share.id : row.shareId));
@@ -145,7 +153,7 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   useInput((input, key) => {
     if (screen.kind !== "confirm") return;
     if (input === "y") {
-      void run(screen.action === "cancel" ? { kind: "cancel", id: screen.id } : { kind: "releaseCopy", id: screen.id });
+      void run(screen.action === "cancel" ? { kind: "cancel", id: screen.id } : screen.action === "releaseAll" ? { kind: "releaseAll" } : { kind: "releaseCopy", id: screen.id });
       setScreen(screen.back.kind === "detail" ? screen.back : { kind: "main" });
     }
     else if (input === "n" || key.escape) setScreen(screen.back);
@@ -199,7 +207,7 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   if (screen.kind === "detail" && detailFile) {
     const share = snapshot.shares.find(item => item.id === detailFile.shareId);
     return <DetailPage file={detailFile} shareTitle={share?.title ?? detailFile.shareId} targetPath={controller.targetPath(detailFile.id)} userPaused={snapshot.userPaused}
-      missing={snapshot.localMissing.has(detailFile.id)} size={size} theme={theme} />;
+      missing={snapshot.localMissing.has(detailFile.id)} releasing={snapshot.releasing.has(detailFile.id)} size={size} theme={theme} />;
   }
   if (screen.kind === "settings") {
     return <SettingsPage outputRoot={snapshot.outputRoot} clipboardOn={snapshot.clipboard !== "off"} connections={snapshot.connections} activeFiles={snapshot.activeFiles} selected={setting.selected} editing={setting.editing}
@@ -208,11 +216,11 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
   const keys: Array<[string, string]> = screen.kind === "confirm" ? [["y", "确认"], ["n", "返回"]]
     : screen.kind === "quit" ? [["y", "退出"], ["n", "返回"]]
     : screen.kind === "paste" ? [["Enter", "提交"], ["Esc", "取消"]]
-    : [["←→", "折叠"], ["Enter", "详情"], ["r", "重试"], ["c", "取消"], ["p", row && selectedPaused(row) ? "继续" : "暂停"],
-      ["P", anyPaused ? "全部开始" : "全部暂停"], ["x", "释放"], ["o", "目录"], ["a", "粘贴"], ["s", "设置"], ["q", "退出"]];
+    : [["Enter", "详情"], ["r", "重试"], ["c", "取消"], ["p", row && selectedPaused(row) ? "继续" : "暂停"],
+      ["P", anyPaused ? "全部开始" : "全部暂停"], ["x/X", "释放/全部"], ["o", "目录"], ["a", "粘贴"], ["s", "设置"], ["q", "退出"]];
   const overlay = screen.kind === "confirm" && screen.release
     ? <ConfirmDialog heading={screen.release.copies ? "释放云端副本" : "删除任务记录"} title={screen.title} confirm={screen.release.copies ? "确认释放" : "确认删除"}
-      detail={releaseDetail(screen.release)} theme={theme} />
+      detail={screen.action === "releaseAll" && screen.release.copies ? "将永久删除 PikPak 中的这些副本（不进回收站），本地文件保留，任务记录一并删除；未完成的任务不受影响。" : releaseDetail(screen.release)} theme={theme} />
     : screen.kind === "confirm"
     ? <ConfirmDialog heading="取消任务" title={screen.title} detail="本地文件、断点和云端副本都会保留，之后可用 r 恢复。" confirm="确认取消" theme={theme} />
     : screen.kind === "quit" ? <ConfirmDialog heading="退出程序" title="停止下载并退出？" detail="当前下载会在安全点停止并保存断点，下次启动继续。" confirm="停止并退出" theme={theme} />

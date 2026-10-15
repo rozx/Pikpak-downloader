@@ -18,10 +18,10 @@ function localState(file: FileView, missing: boolean): [string, Tone] {
   if (file.state === "completed") return missing ? ["已不存在 · 被移动或删除", "warning"] : ["存在", "done"];
   return file.checkpoint > 0n ? [`已下载部分 · ${formatBytes(file.checkpoint)} / ${formatBytes(file.size)}`, "text"] : ["尚未下载", "muted"];
 }
-export function DetailPage({ file, shareTitle, targetPath, userPaused, missing = false, size, theme }: {
-  file: FileView; shareTitle: string; targetPath: string | null; userPaused: boolean; missing?: boolean; size: Size; theme: Theme;
+export function DetailPage({ file, shareTitle, targetPath, userPaused, missing = false, releasing = false, size, theme }: {
+  file: FileView; shareTitle: string; targetPath: string | null; userPaused: boolean; missing?: boolean; releasing?: boolean; size: Size; theme: Theme;
 }) {
-  const look = fileLook(file, { userPaused }), reason = explain(file.lastError);
+  const look = fileLook(file, { userPaused, releasing }), reason = explain(file.lastError);
   const fields: Array<[string, string, Tone]> = [
     ["文件", fileName(file.relativePath), "strong"], ["相对路径", displayPath(file.relativePath), "text"],
     ["大小", `${formatBytes(file.size)}（${file.size.toLocaleString("en-US")} 字节）`, "text"], ["状态", `${look.icon} ${look.label}`, look.tone],

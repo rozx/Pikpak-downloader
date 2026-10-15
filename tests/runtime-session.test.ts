@@ -7,7 +7,7 @@ import { Store } from "../src/state/store";
 import { IntakeReceiver } from "../src/intake/receiver";
 import { loadShareAccess } from "../src/auth/share-access";
 import { Drive } from "../src/pikpak/drive";
-import { Engine, type RuntimeEvent } from "../src/runtime/engine";
+import { Engine, type ReleasePreview, type RuntimeEvent } from "../src/runtime/engine";
 import { RuntimeSession, type SessionEngine } from "../src/runtime/session";
 import { systemFiles } from "../src/platform/file-system";
 import type { LocalFileSystem } from "../src/platform/files";
@@ -281,5 +281,22 @@ test("释放云端副本：命令立即返回并在事件中报告副本数；�
     expect(events).toEqual([{ type: "command", reason: "releaseCopy", id: f.first.id, count: 2 }, { type: "command_failed", reason: "copy_absent", id: f.second.id }]);
     expect(signals.every(signal => !signal.aborted)).toBe(true);
     expect(session.releasable(f.first.id)).toEqual({ ok: false, reason: "copy_in_use" });
+  } finally { await f.close(); }
+});
+
+test("全部释放：命令以 null 范围交给引擎，事件报告副本数；只有记录可删时报告记录数；releasing 返回释放中的文件", async () => {
+  const f = await storeFixture();
+  try {
+    const fake = fakeEngine(async () => false); const scopes: Array<string | null> = []; let preview: ReleasePreview = { ok: true, copies: 3, bytes: 30n, unfinished: 0, removed: 3 };
+    fake.engine.release = id => { scopes.push(id); return preview; };
+    fake.engine.releasingFiles = () => [f.first.id];
+    const session = new RuntimeSession(f.store, "account", fake.engine, f.receiver, fakeClipboard().clipboard);
+    const events: RuntimeEvent[] = []; session.subscribe(event => events.push(event));
+    expect((await session.command({ kind: "releaseAll" })).ok).toBe(true);
+    preview = { ok: true, copies: 0, bytes: 0n, unfinished: 0, removed: 2 };
+    expect((await session.command({ kind: "releaseAll" })).ok).toBe(true);
+    expect(scopes).toEqual([null, null]);
+    expect(events).toEqual([{ type: "command", reason: "releaseAll", count: 3 }, { type: "command", reason: "releaseAll", count: 0, size: 2n }]);
+    expect(session.releasing()).toEqual([f.first.id]);
   } finally { await f.close(); }
 });

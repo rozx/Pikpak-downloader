@@ -81,7 +81,9 @@ const pauses: Record<PauseReason, Explanation> = {
 export const pauseExplanation = (pause: Pause): Explanation => pauses[pause.reason];
 
 // 完成优先于取消，取消优先于暂停；失败与等待附带原因。
-export function fileLook(file: FileView, options: { userPaused: boolean; sharePaused?: boolean; missing?: boolean }): Look {
+export function fileLook(file: FileView, options: { userPaused: boolean; sharePaused?: boolean; missing?: boolean; releasing?: boolean }): Look {
+  // 正在释放云端副本的文件优先显示“释放中”，带动态图标。
+  if (options.releasing) return { icon: "♻", tone: "transfer", label: "释放中", active: true };
   // 已完成但交付的本地文件已不在：行尾没有本地图标，状态写明原因。
   if (file.state === "completed") return options.missing ? { ...stateLooks.completed, tone: "warning", label: "已完成 · 本地文件已不在" } : stateLooks.completed;
   if (file.cancelled) return { icon: "⊘", tone: "muted", label: "已取消" };
@@ -101,7 +103,7 @@ export function fileLocation(file: FileView, missing = false): Location {
 }
 
 export type ShareCounts = { total: number; completed: number; downloading: number; transferring: number; queued: number; paused: number; failed: number; waiting: number; cancelled: number;
-  local: number; partial: number; cloud: number; missing: number };
+  local: number; partial: number; cloud: number; missing: number; releasing: number };
 // 位置图标（add-task-controls 决策 6）：每行只用一个单宽文本符号（不用 emoji）。
 // ▣ 只在本地（绿色；只有下载了一部分的数据、云端也没有副本时为灰色），⧉ 本地与云端都有（青色），☁ 只在云端（淡蓝色，含下载中的文件），都不在时留空。
 export const LOCATION_MARKS = { local: "\u25a3", both: "\u29c9", cloud: "\u2601" } as const;
@@ -115,10 +117,11 @@ export function locationMark(location: Location): { mark: string; tone: Tone } |
 }
 // 分享的位置：有已完成且在本地的文件即为本地，否则有下载了一部分的文件即为部分；有文件在云端即为云端。
 export const shareLocation = (counts: ShareCounts): Location => ({ local: counts.local ? "full" : counts.partial ? "partial" : null, cloud: counts.cloud > 0 });
-export function shareCounts(files: FileView[], userPaused: boolean, sharePaused = false, missing: ReadonlySet<string> = new Set()): ShareCounts {
+export function shareCounts(files: FileView[], userPaused: boolean, sharePaused = false, missing: ReadonlySet<string> = new Set(), releasing: ReadonlySet<string> = new Set()): ShareCounts {
   const counts: ShareCounts = { total: files.length, completed: 0, downloading: 0, transferring: 0, queued: 0, paused: 0, failed: 0, waiting: 0, cancelled: 0,
-    local: 0, partial: 0, cloud: 0, missing: 0 };
+    local: 0, partial: 0, cloud: 0, missing: 0, releasing: 0 };
   for (const file of files) {
+    if (releasing.has(file.id)) counts.releasing++;
     const location = fileLocation(file, missing.has(file.id));
     if (location.cloud) counts.cloud++;
     if (location.local) counts[location.local === "full" ? "local" : location.local]++;
@@ -144,8 +147,8 @@ export type Row = { kind: "share"; key: string; share: ShareView; counts: ShareC
   | { kind: "file"; key: string; shareId: string; file: FileView; name: string; path: string; look: Look; location: Location };
 // 未完成的分享默认展开，全部完成的默认折叠；用户的折叠选择优先。
 export function buildRows(input: { shares: ShareView[]; files: Record<string, FileView[]>; expanded: Record<string, boolean | undefined>; userPaused: boolean;
-  missing?: ReadonlySet<string> }): ListRow[] {
-  const missing = input.missing ?? new Set<string>();
+  missing?: ReadonlySet<string>; releasing?: ReadonlySet<string> }): ListRow[] {
+  const missing = input.missing ?? new Set<string>(), releasing = input.releasing ?? new Set<string>();
   const rows: ListRow[] = [];
   // 目录按首次出现的顺序排列，组内分享保持原顺序。
   const groups = new Map<string, ShareView[]>();
@@ -155,10 +158,10 @@ export function buildRows(input: { shares: ShareView[]; files: Record<string, Fi
     for (const share of shares) {
       const files = input.files[share.id] ?? [];
       const expanded = input.expanded[share.id] ?? share.summary.status !== "completed";
-      rows.push({ kind: "share", key: `s:${share.id}`, share, counts: shareCounts(files, input.userPaused, share.paused, missing), expanded });
+      rows.push({ kind: "share", key: `s:${share.id}`, share, counts: shareCounts(files, input.userPaused, share.paused, missing, releasing), expanded });
       if (expanded) for (const file of files) {
         rows.push({ kind: "file", key: `f:${file.id}`, shareId: share.id, file, name: fileName(file.relativePath), path: displayPath(file.relativePath),
-          look: fileLook(file, { userPaused: input.userPaused, sharePaused: share.paused, missing: missing.has(file.id) }), location: fileLocation(file, missing.has(file.id)) });
+          look: fileLook(file, { userPaused: input.userPaused, sharePaused: share.paused, missing: missing.has(file.id), releasing: releasing.has(file.id) }), location: fileLocation(file, missing.has(file.id)) });
       }
     }
   }
@@ -217,7 +220,8 @@ export function describeEvent(event: RuntimeEvent, names: NameLookup): LogLine |
       if (kind === "pauseTask") return { icon: "⏸", tone: "warning", text: `已暂停 ${target(event.id)}` };
       if (kind === "resumeTask") return { icon: "▶", tone: "active", text: `已继续 ${target(event.id)}` };
       if (kind === "startAll") return { icon: "▶", tone: "active", text: "全部开始" };
-      if (kind === "releaseCopy") return { icon: "♻", tone: "active", text: `正在释放 ${target(event.id)} 的 ${event.count ?? 0} 个云端副本` };
+      if (kind === "releaseCopy") return { icon: "♻", tone: "active", text: event.count ? `正在释放 ${target(event.id)} 的 ${event.count} 个云端副本` : `正在删除 ${target(event.id)} 的任务记录` };
+      if (kind === "releaseAll") return { icon: "♻", tone: "active", text: event.count ? `正在释放全部已完成任务的 ${event.count} 个云端副本` : `正在删除 ${event.size ?? 0n} 个已完成任务的记录` };
       if (kind === "pauseQueue") return { icon: "⏸", tone: "warning", text: "队列已暂停" };
       if (kind === "resumeQueue") return { icon: "▶", tone: "active", text: "队列已继续" };
       if (kind === "setOutputRoot") return { icon: "●", tone: "done", text: event.count

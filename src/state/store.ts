@@ -403,11 +403,13 @@ export class Store {
   }
   // 文件或分享中保留着的副本，以及云端已没有副本、可以直接删除记录的已完成文件（orphans）；
   // 两者都没有时给出原因（正在使用优先于非本工具创建，最后是没有副本）。
-  releaseTargets(accountId: string, id: string): { targets: ReleaseTarget[]; orphans: string[]; reason: string | null } {
-    const shareScope = id.startsWith("s_");
-    if (shareScope) this.share(accountId, id); else this.file(accountId, id);
+  // id 为 null 时范围是整个账号（全部释放）。
+  releaseTargets(accountId: string, id: string | null): { targets: ReleaseTarget[]; orphans: string[]; reason: string | null } {
+    const shareScope = id?.startsWith("s_") ?? false;
+    if (id !== null) { if (shareScope) this.share(accountId, id); else this.file(accountId, id); }
+    const scope = id === null ? "1=1" : shareScope ? "f.share_id=?" : "f.id=?", bindings = id === null ? [] : [id];
     const rows = this.all<{ id: string }>(`SELECT DISTINCT c.id FROM copies c JOIN copy_references r ON r.copy_id=c.id JOIN files f ON f.id=r.file_id
-      WHERE c.account_id=? AND c.state='retained' AND ${shareScope ? "f.share_id=?" : "f.id=?"} ORDER BY c.id`, accountId, id);
+      WHERE c.account_id=? AND c.state='retained' AND ${scope} ORDER BY c.id`, accountId, ...bindings);
     const targets: ReleaseTarget[] = []; let notOwned = false, busy = false;
     for (const row of rows) {
       const copy = this.copy(accountId, row.id);
@@ -416,8 +418,8 @@ export class Store {
       const files = this.all<{ id: string; state: FileState }>("SELECT f.id,f.state FROM copy_references r JOIN files f ON f.id=r.file_id WHERE r.copy_id=? ORDER BY f.rowid", copy.id);
       targets.push({ copy, fileIds: files.map(file => file.id), completed: files.every(file => file.state === "completed") });
     }
-    const orphans = this.all<{ id: string }>(`SELECT f.id FROM files f WHERE f.account_id=? AND ${shareScope ? "f.share_id=?" : "f.id=?"}
-      AND ${forgettable} ORDER BY f.rowid`, accountId, id).map(row => row.id);
+    const orphans = this.all<{ id: string }>(`SELECT f.id FROM files f WHERE f.account_id=? AND ${scope}
+      AND ${forgettable} ORDER BY f.rowid`, accountId, ...bindings).map(row => row.id);
     return { targets, orphans, reason: targets.length || orphans.length ? null : busy ? "copy_in_use" : notOwned ? "copy_not_owned" : "copy_absent" };
   }
   // 释放后删除任务记录（add-task-controls 决策 7）：已完成、云端已没有本工具管理的副本、没有未核对操作的文件。本地文件不动。

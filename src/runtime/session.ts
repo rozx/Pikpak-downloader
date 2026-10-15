@@ -15,11 +15,11 @@ export type SessionCommand =
   | { kind: "pauseQueue" } | { kind: "resumeQueue" }
   | { kind: "submitText"; text: string } | { kind: "setOutputRoot"; path: string }
   | { kind: "setClipboardWatch"; enabled: boolean } | { kind: "setDownloadConnections"; count: number } | { kind: "setActiveFiles"; count: number }
-  | { kind: "pauseTask"; id: string } | { kind: "resumeTask"; id: string } | { kind: "startAll" } | { kind: "releaseCopy"; id: string };
+  | { kind: "pauseTask"; id: string } | { kind: "resumeTask"; id: string } | { kind: "startAll" } | { kind: "releaseCopy"; id: string } | { kind: "releaseAll" };
 export type CommandResult = { ok: true; ids: string[]; issues: string[] } | { ok: false; reason: string };
 // stopActive / isPooled 对应下载池（add-concurrent-file-downloads）；只有串行执行器的测试替身可以不提供。
 export type SessionEngine = Pick<Engine, "step" | "resumeLocalPause" | "resumeTrafficPause" | "reconcile" | "blockPersistence" | "subscribe">
-  & Partial<Pick<Engine, "stopActive" | "isPooled" | "releasable" | "release" | "settleReleases">>;
+  & Partial<Pick<Engine, "stopActive" | "isPooled" | "releasable" | "release" | "settleReleases" | "releasingFiles">>;
 type Pending = { command: SessionCommand; resolve: (result: CommandResult) => void };
 
 // 与 config --output 相同的目录校验：存在、是目录、可写可进入。
@@ -106,8 +106,9 @@ export class RuntimeSession {
     }
   }
 
+  releasing(): string[] { return this.engine.releasingFiles?.() ?? []; }
   // 手动释放的预览（只读）：界面据此决定打开确认框还是说明原因。
-  releasable(id: string): ReleasePreview {
+  releasable(id: string | null): ReleasePreview {
     try { return this.engine.releasable?.(id) ?? { ok: false, reason: "copy_absent" }; }
     catch (error) { return { ok: false, reason: error instanceof AppError ? error.code : "operation_failed" }; }
   }
@@ -136,7 +137,7 @@ export class RuntimeSession {
     const account = this.accountId;
     const id = "id" in command ? { id: command.id } : {};
     try {
-      let result: CommandResult = { ok: true, ids: [], issues: [] }, count: number | undefined;
+      let result: CommandResult = { ok: true, ids: [], issues: [] }, count: number | undefined, records: number | undefined;
       if (command.kind === "retry") this.store.retry(account, command.id);
       else if (command.kind === "cancel") {
         // 先写取消标记，调度不再选这些文件；再停下下载池中的目标（或该分享的文件），其他在途文件继续。
@@ -154,11 +155,11 @@ export class RuntimeSession {
         const root = await writableDirectory(command.path);
         this.store.setConfig("output_root", root); this.receiver.setOutputRoot(root);
         result = { ok: true, ids: this.store.moveUnstartedShares(account, root), issues: [] }; count = result.ids.length;
-      } else if (command.kind === "releaseCopy") {
-        // 立即返回：删除与核对在后台进行，结果由引擎事件报告；会话停止时随运行信号中断。
-        const started = this.engine.release?.(command.id, this.running ?? new AbortController().signal) ?? { ok: false, reason: "copy_absent" };
+      } else if (command.kind === "releaseCopy" || command.kind === "releaseAll") {
+        // 立即返回：删除与核对在后台进行，结果由引擎事件报告；会话停止时随运行信号中断。全部释放只处理已完成的任务。
+        const started = this.engine.release?.(command.kind === "releaseAll" ? null : command.id, this.running ?? new AbortController().signal) ?? { ok: false, reason: "copy_absent" };
         if (!started.ok) { this.emit({ type: "command_failed", reason: started.reason, ...id }); return started; }
-        count = started.copies;
+        count = started.copies; if (!started.copies) records = started.removed;
       } else if (command.kind === "setDownloadConnections") saveConnections(this.store, command.count);
       else if (command.kind === "setActiveFiles") saveActiveFiles(this.store, command.count);
       else if (command.kind === "setClipboardWatch") {
@@ -169,7 +170,8 @@ export class RuntimeSession {
         this.report(intake);
         result = intake.failure ? { ok: false, reason: intake.failure } : { ok: true, ids: intake.ids, issues: intake.issues };
       }
-      this.emit({ type: "command", reason: command.kind, ...id, ...(count === undefined ? {} : { count }) });
+      // 只删除记录（云盘中已没有副本）时，事件用 size 携带要删除的记录数。
+      this.emit({ type: "command", reason: command.kind, ...id, ...(count === undefined ? {} : { count }), ...(records === undefined ? {} : { size: BigInt(records) }) });
       return result;
     } catch (error) {
       const reason = error instanceof AppError ? error.code : "operation_failed";

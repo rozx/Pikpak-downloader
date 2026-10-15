@@ -17,6 +17,8 @@ export type TuiSnapshot = {
   activeFiles: { configured: number; effective: number; tier: Tier };
   // 已完成但交付的本地文件已不存在（被移动或删除）的文件 ID。
   localMissing: ReadonlySet<string>;
+  // 正在释放云端副本的文件 ID。
+  releasing: ReadonlySet<string>;
 };
 export type PastePreview = { shares: number; paired: number; issues: string[] };
 export type OpenResult = { ok: true } | { ok: false; reason: string };
@@ -30,7 +32,8 @@ export interface TuiController {
   preview(text: string): PastePreview;
   targetPath(fileId: string): string | null;
   // 手动释放云端副本的预览（文件或分享）。
-  releasePreview(id: string): ReleasePreview;
+  // id 为 null 时预览全部释放（只含已完成的任务）。
+  releasePreview(id: string | null): ReleasePreview;
   openDirectory(target: { shareId: string; fileId?: string }): Promise<OpenResult>;
   stop(): void;
   forceExit(): void;

@@ -6,6 +6,7 @@ import type { CommandResult, RuntimeSession, SessionCommand } from "../runtime/s
 import { pastePreview, type LogEntry, type OpenResult, type Progress, type TuiController, type TuiSnapshot } from "./controller";
 import { describeEvent, type LogLine } from "./view-model";
 import { fileName } from "./format";
+import { taskName } from "../download/names";
 import { SpeedMeter } from "./speed";
 import { openDirectory } from "./open-directory";
 import { configuredConnections } from "../download/connections";
@@ -13,7 +14,7 @@ import { configuredActiveFiles } from "../runtime/active-files";
 import { tierCap, type Tier } from "../pikpak/tier";
 
 export type LiveOptions = {
-  store: Store; accountId: string; session: Pick<RuntimeSession, "subscribe" | "command"> & Partial<Pick<RuntimeSession, "releasable">>;
+  store: Store; accountId: string; session: Pick<RuntimeSession, "subscribe" | "command"> & Partial<Pick<RuntimeSession, "releasable" | "releasing">>;
   quota: () => Promise<{ usage: bigint; limit: bigint }>; localFree: () => Promise<bigint>;
   stop: () => void; forceExit: () => void; open?: (path: string) => Promise<OpenResult>; tier?: () => Tier;
   // 本地文件是否存在：true 存在，false 不存在，null 无法判断（保留上次结果）。
@@ -21,7 +22,7 @@ export type LiveOptions = {
   now?: () => number; snapshotMs?: number; flushMs?: number; quotaMs?: number; localMs?: number; maxEvents?: number;
 };
 // 这些事件前后会发生转存、回收或交付，云盘容量随之变化。
-const quotaEvents = new Set(["downloading", "completed", "waiting_space", "copy_released"]);
+const quotaEvents = new Set(["downloading", "completed", "waiting_space", "copy_released", "release_finished"]);
 const pathExists = (path: string): Promise<boolean | null> =>
   stat(path).then(() => true, (error: { code?: string }) => error.code === "ENOENT" || error.code === "ENOTDIR" ? false : null);
 
@@ -75,7 +76,7 @@ export class LiveController implements TuiController {
   targetPath = (fileId: string): string | null => {
     try { return this.options.store.delivery(this.options.accountId, fileId)?.targetPath ?? null; } catch { return null; }
   };
-  releasePreview = (id: string): ReleasePreview => this.options.session.releasable?.(id) ?? { ok: false, reason: "copy_absent" };
+  releasePreview = (id: string | null): ReleasePreview => this.options.session.releasable?.(id) ?? { ok: false, reason: "copy_absent" };
   openDirectory = async (target: { shareId: string; fileId?: string }): Promise<OpenResult> => {
     const path = target.fileId ? this.targetPath(target.fileId) : null;
     let root: string;
@@ -112,7 +113,7 @@ export class LiveController implements TuiController {
     const max = this.options.maxEvents ?? 50; if (this.events.length > max) this.events.splice(0, this.events.length - max);
   }
   private shareTitle(id: string): string | null {
-    try { return this.options.store.shareTitle(this.options.accountId, id); } catch { return null; }
+    try { const title = this.options.store.shareTitle(this.options.accountId, id); return title === null ? null : taskName(title); } catch { return null; }
   }
   private fileTitle(id: string): string | null {
     try { return fileName(this.options.store.file(this.options.accountId, id).relativePath); } catch { return null; }
@@ -140,14 +141,15 @@ export class LiveController implements TuiController {
 
   private build(): TuiSnapshot {
     const { store, accountId } = this.options;
-    const shares = store.shareViews(accountId);
+    // 任务名称去掉文件后缀显示（add-task-controls 决策 9），与任务目录名一致。
+    const shares = store.shareViews(accountId).map(share => share.title === null ? share : { ...share, title: taskName(share.title) });
     const files = Object.fromEntries(shares.map(share => [share.id, store.fileViews(accountId, share.id)]));
     const progress: Record<string, Progress> = {};
     for (const [id, value] of this.progress) progress[id] = { ...value, rate: this.meter.rate(id), eta: this.meter.eta(id, value.size) };
     return { shares, files, quota: this.quota, localFree: this.localFree, clipboard: this.clipboard,
       userPaused: store.config("queue_paused") === "1", systemPause: store.paused(accountId), progress, events: [...this.events],
       outputRoot: store.config("output_root"), stopping: this.stopping, connections: configuredConnections(store), activeFiles: this.activeFiles(),
-      localMissing: this.missing };
+      localMissing: this.missing, releasing: new Set(this.options.session.releasing?.() ?? []) };
   }
   private activeFiles(): TuiSnapshot["activeFiles"] {
     const configured = configuredActiveFiles(this.options.store), tier = this.options.tier?.() ?? "unknown";
