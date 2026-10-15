@@ -37,6 +37,9 @@ bun run build bun-windows-x64                  # 单文件产物输出到 dist/�
   - 新功能升次版本号，修复升修订号（当前处于 0.x 阶段）。
   - 用单独的 `chore: bump version to x.y.z` 提交记录。
   - `tests/lifecycle.test.ts` 直接读取 `package.json`，升级版本号不用改测试。
+- 发布用 `release-ready` 技能（`.claude/skills/release-ready/`，`.agents/skills/release-ready` 是指向它的符号链接）：
+  - 在 `release/x.y.z` 分支上核对版本，写 `docs/releaseNotes/vx.y.z.md`，更新文档，创建带 `release` 标签的 PR。这是“直接提交到 main”的唯一例外。
+  - PR 合并后，`.github/workflows/release.yml` 在三个平台上检查并构建，以该发布说明为正文创建 `vx.y.z` 的 Release；发布说明缺失时拒绝发布。
 - 分享链接、提取码、令牌和签名下载地址不得出现在输出、日志、事件或测试快照里。凭据只存放在系统受保护存储中，任务库只保存引用。
 
 ## 架构
