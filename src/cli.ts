@@ -17,7 +17,8 @@ import { interruptible } from "./runtime/lifecycle";
 const help = `PikPak Downloader ${version}（开发中）
 把 PikPak 云盘作为下载中转空间。
 
-用法：pikpak-downloader <命令> [选项]
+用法：pikpak-downloader              在交互终端中打开全屏界面（检查登录与下载目录后开始监听）
+      pikpak-downloader <命令> [选项] 供脚本或非交互场景使用
 
   --help                 显示帮助
   --version              显示版本
@@ -42,6 +43,13 @@ export async function runCli(args: string[]): Promise<void> {
   if (args[0] === "--internal-clipboard") {
     if (process.stdin.isTTY || process.stdout.isTTY) throw new AppError("invalid_input");
     await clipboardWorker(args[1]); return;
+  }
+  // 只有标准输入与输出都是交互终端时才进入全屏界面；重定向或管道中打印纯文本帮助。
+  if (!args.length && process.stdin.isTTY && process.stdout.isTTY) {
+    const { runTui } = await import("./tui/run");
+    const code = await runTui();
+    if (code === 130) process.exit(code);
+    process.exitCode = code; return;
   }
   if (!args.length || (args.length === 1 && ["--help", "-h", "help"].includes(args[0]!))) {
     console.log(help); return;

@@ -31,6 +31,7 @@ export class LiveController implements TuiController {
   private localFree: bigint | null = null;
   private clipboard: TuiSnapshot["clipboard"];
   private stopping = false;
+  private completed = 0;
   private unsubscribe: (() => void) | null = null;
   private readonly now: () => number;
   constructor(private readonly options: LiveOptions) {
@@ -72,12 +73,18 @@ export class LiveController implements TuiController {
   };
   stop = (): void => { if (this.stopping) return; this.stopping = true; this.refresh(); this.options.stop(); };
   forceExit = (): void => this.options.forceExit();
+  // 退出后打印在主屏幕上的会话摘要。
+  summary(): string {
+    let unfinished = 0;
+    try { for (const files of Object.values(this.build().files)) unfinished += files.filter(file => file.state !== "completed" && !file.cancelled).length; } catch { /* 任务库已关闭时只报告完成数。 */ }
+    return `本次完成 ${this.completed} 个文件${unfinished ? `；还有 ${unfinished} 个未完成，下次启动会继续` : ""}。`;
+  }
 
   private handle(event: RuntimeEvent): void {
     if (event.type === "progress" && event.id && event.bytes !== undefined && event.size !== undefined) {
       this.progress.set(event.id, { bytes: event.bytes, size: event.size }); this.meter.sample(event.id, event.bytes);
     } else {
-      if (event.type === "completed" && event.id) { this.progress.delete(event.id); this.meter.forget(event.id); }
+      if (event.type === "completed" && event.id) { this.completed++; this.progress.delete(event.id); this.meter.forget(event.id); }
       if (event.type === "clipboard_unavailable") this.clipboard = "unavailable";
       if (event.type === "clipboard_recovered" || (event.type === "started" && event.reason !== "clipboard_off")) this.clipboard = this.options.store.config("clipboard_watch") === "0" ? "off" : "on";
       if (event.type === "started" && event.reason === "clipboard_off") this.clipboard = "off";

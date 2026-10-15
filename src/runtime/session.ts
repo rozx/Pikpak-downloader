@@ -18,7 +18,7 @@ export type SessionEngine = Pick<Engine, "step" | "resumeLocalPause" | "resumeTr
 type Pending = { command: SessionCommand; resolve: (result: CommandResult) => void };
 
 // 与 config --output 相同的目录校验：存在、是目录、可写可进入。
-async function writableDirectory(path: string): Promise<string> {
+export async function writableDirectory(path: string): Promise<string> {
   try {
     const root = await realpath(resolve(path));
     if (!(await stat(root)).isDirectory()) throw new AppError("output_unavailable");

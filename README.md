@@ -19,14 +19,32 @@ macOS 原生构建需要 Xcode Command Line Tools 和 Node-API 头文件；可�
 
 ## Usage
 
-macOS arm64 开发构建：
+在终端中不带参数运行即进入全屏界面：
+
+```sh
+./dist/pikpak-downloader-windows-x64.exe
+```
+
+首次启动会引导在浏览器中完成官方授权（界面内不输入密码）并选择下载目录，之后直接开始监听剪贴板。主面板按分享分组显示文件状态、进度、速度和剩余时间，常用按键：
+
+| 按键 | 作用 |
+| --- | --- |
+| ↑↓ / ←→ / Enter | 选择、折叠或展开分享、查看文件详情 |
+| r / c | 重试；取消（需确认，保留本地文件、断点和云端副本） |
+| p | 暂停或继续整个队列（重启后保持） |
+| o / a / s | 打开下载目录；粘贴分享文本；设置下载目录与剪贴板监听 |
+| q / Ctrl+C | 停止并保存进度；停止期间再按 Ctrl+C 立即退出 |
+
+窗口至少需要 60×15；设置 `NO_COLOR` 可关闭颜色。输出被重定向或在脚本中运行时不会进入界面，可以使用下面的子命令。
+
+子命令（以 macOS arm64 开发构建为例）：
 
 ```sh
 ./dist/pikpak-downloader-darwin-arm64 login
 ./dist/pikpak-downloader-darwin-arm64 watch --output "$HOME/Downloads"
 ```
 
-看到接收确认后，任务会进入扫描、转存、下载和校验。按 Ctrl+C 停止后可操作：
+`watch` 是纯文本的前台监听，进度每跨过 10% 或满 30 秒输出一行。看到接收确认后，任务会进入扫描、转存、下载和校验。按 Ctrl+C 停止后可操作：
 
 ```sh
 ./dist/pikpak-downloader-darwin-arm64 status

@@ -11,7 +11,10 @@ async function openBrowser(url: string): Promise<void> {
   if (await child.exited !== 0) throw new AppError("authorization_failed");
 }
 
-export async function login(session: SessionManager, force = false, announce = console.log): Promise<string> {
+export type LoginOptions = { signal?: AbortSignal; openBrowser?: (url: string) => Promise<void> };
+// signal 取消时立即结束等待并关闭本地回调服务。
+export async function login(session: Pick<SessionManager, "existingLogin" | "client" | "accept">, force = false, announce = console.log,
+  options: LoginOptions = {}): Promise<string> {
   if (!force) {
     try { const existing = await session.existingLogin(); if (existing) return existing; }
     catch { /* 明确的 login 命令允许重新授权，旧任务仍保留。 */ }
@@ -52,9 +55,11 @@ export async function login(session: SessionManager, force = false, announce = c
     },
   });
   const timeout = setTimeout(() => reject(new AppError("authorization_failed")), 15 * 60_000);
+  const cancel = () => reject(new AppError("authorization_failed"));
+  if (options.signal?.aborted) cancel(); else options.signal?.addEventListener("abort", cancel, { once: true });
   try {
     announce(`请在浏览器完成登录。本地入口：${callback.origin}`);
-    await openBrowser(callback.origin).catch(() => { announce("自动打开浏览器失败，请手动打开上方本地入口。"); });
+    await (options.openBrowser ?? openBrowser)(callback.origin).catch(() => { announce("自动打开浏览器失败，请手动打开上方本地入口。"); });
     return await result;
-  } finally { clearTimeout(timeout); server.stop(true); }
+  } finally { clearTimeout(timeout); options.signal?.removeEventListener("abort", cancel); server.stop(true); }
 }

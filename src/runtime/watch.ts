@@ -45,21 +45,26 @@ export async function watch(store: Store, output: string | null, signal: AbortSi
     await access(root, constants.W_OK | constants.X_OK);
   } catch { throw new AppError("output_unavailable"); }
   const filesystem = systemFiles();
-  try { await startWatch(store, accountId, root, signal, filesystem); }
-  finally { await filesystem.close(); }
+  try {
+    const { session } = await prepareRuntime(store, accountId, root, filesystem, printEvent);
+    session.subscribe(event => { const message = sessionMessage(event); if (message) console.log(message); });
+    await session.run(signal);
+  } finally { await filesystem.close(); }
 }
 
-async function startWatch(store: Store, accountId: string, root: string, signal: AbortSignal, filesystem: LocalFileSystem): Promise<void> {
+// watch 与全屏界面共用的启动准备：核对输出目录与登录会话，组装执行器和前台会话。
+export async function prepareRuntime(store: Store, accountId: string, root: string, filesystem: LocalFileSystem,
+  report: (event: RuntimeEvent) => void): Promise<{ session: RuntimeSession; drive: Drive }> {
   try {
     const validation = await filesystem.root(root);
     try { await validation.identity(); await validation.freeBytes(); } finally { await validation.close(); }
   } catch { throw new AppError("output_unavailable"); }
   const secrets = systemSecrets();
   if (!await secrets.get("session.current")) throw new AppError("login_required");
-  const session = new SessionManager(secrets, undefined, account => { store.ensureAccount(account); store.pause(account, "authentication"); });
+  const manager = new SessionManager(secrets, undefined, account => { store.ensureAccount(account); store.pause(account, "authentication"); });
   if (!store.rateLimited(accountId)) {
     try {
-      const identity = await session.existingLogin();
+      const identity = await manager.existingLogin();
       if (identity !== accountId) throw new AppError("account_mismatch");
       store.clearAuthenticationPause(accountId);
     } catch { store.pause(accountId, "authentication"); }
@@ -67,10 +72,9 @@ async function startWatch(store: Store, accountId: string, root: string, signal:
   store.setConfig("output_root", root);
   if (store.paused(accountId)?.reason === "database") store.resume(accountId,
     { authenticated: true, permitted: true, writable: true, hasSpace: true, targetAvailable: true, trafficAvailable: true });
-  const clipboard = systemClipboard();
-  const receiver = new IntakeReceiver(store, secrets, accountId, root);
-  const engine = new Engine(store, secrets, new Drive(new PikpakClient(session, store), accountId), filesystem, printEvent);
-  await foregroundLoop(store, accountId, clipboard, receiver, engine, signal);
+  const drive = new Drive(new PikpakClient(manager, store), accountId);
+  const engine = new Engine(store, secrets, drive, filesystem, report);
+  return { session: new RuntimeSession(store, accountId, engine, new IntakeReceiver(store, secrets, accountId, root), systemClipboard()), drive };
 }
 
 // 会话自身的事件转成纯文本提示；执行器事件由创建执行器时传入的 printEvent 输出。
