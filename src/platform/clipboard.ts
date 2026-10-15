@@ -1,5 +1,6 @@
 import { AppError } from "../errors";
 import type { Clipboard } from "../intake/clipboard";
+import { LinuxClipboard } from "./linux-clipboard";
 import { ProcessClipboard } from "./windows-clipboard";
 import { resolve } from "node:path";
 
@@ -13,5 +14,6 @@ export function macClipboardWorker(board?: string): Clipboard {
 export function systemClipboard(): Clipboard {
   if (process.platform === "darwin") return macClipboardWorker();
   if (process.platform === "win32") return new ProcessClipboard();
+  if (process.platform === "linux") return new LinuxClipboard();
   throw new AppError("unsupported_platform");
 }
