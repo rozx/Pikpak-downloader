@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { parseScopes } from "../auth/permissions";
 
 export const ENDPOINTS = {
   issuer: "https://user.mypikpak.com",
@@ -174,7 +175,8 @@ export function takeAuthorizationCode(url: URL, attempt: Attempt, now = Date.now
   return codes[0];
 }
 
-export type Tokens = { accessToken: string; refreshToken?: string; expiresIn: number };
+// scope：服务端授予的授权范围（RFC 6749 §5.1）；未返回时省略。
+export type Tokens = { accessToken: string; refreshToken?: string; expiresIn: number; scope?: string[] };
 function tokens(data: Record<string, unknown>, stage: string): Tokens {
   if (typeof data.token_type !== "string" || data.token_type.toLowerCase() !== "bearer") {
     throw new ProviderError(stage, "unsupported-token-type");
@@ -182,7 +184,8 @@ function tokens(data: Record<string, unknown>, stage: string): Tokens {
   const accessToken = nonempty(data.access_token, stage);
   const expiresIn = typeof data.expires_in === "number" && Number.isFinite(data.expires_in)
     ? data.expires_in : 0;
-  return { accessToken, expiresIn,
+  const scope = parseScopes(data.scope);
+  return { accessToken, expiresIn, ...(scope ? { scope } : {}),
     ...(typeof data.refresh_token === "string" && data.refresh_token ? { refreshToken: data.refresh_token } : {}) };
 }
 
@@ -204,11 +207,16 @@ export async function refresh(client: Client, refreshToken: string, http: Transp
   return tokens(data, "token-refresh");
 }
 
-export async function identity(accessToken: string, http: Transport = transport): Promise<string> {
+export type Profile = { id: string; name: string | null; email: string | null };
+export async function profile(accessToken: string, http: Transport = transport): Promise<Profile> {
   const data = await requestJson("identity", ENDPOINTS.userinfo_endpoint, {
     headers: { Authorization: `Bearer ${accessToken}` },
   }, http);
-  return nonempty(data.sub, "identity");
+  const text = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : null;
+  return { id: nonempty(data.sub, "identity"), name: text(data.name), email: text(data.email) };
+}
+export async function identity(accessToken: string, http: Transport = transport): Promise<string> {
+  return (await profile(accessToken, http)).id;
 }
 
 export async function quotaReadable(accessToken: string, http: Transport = transport): Promise<void> {

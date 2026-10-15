@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { DEFAULT_ACTIVE_FILES, MAX_ACTIVE_FILES, configuredActiveFiles, parseActiveFiles, saveActiveFiles } from "../src/runtime/active-files";
-import { AccountTier, PAID_ACTIVE_FILES, classifyTier, storedTier, tierCap } from "../src/pikpak/tier";
+import { AccountTier, PAID_ACTIVE_FILES, classifyTier, membership, storedTier, tierCap } from "../src/pikpak/tier";
 import { ProviderError } from "../src/pikpak/protocol";
 
 function memoryConfig(initial: Record<string, string> = {}) {
@@ -29,6 +29,13 @@ test("等级判断：只有 ok、非 novip 且未到期时才是会员；格式�
   expect(classifyTier({ data: { status: "ok", type: "platinum", expire: "not a date" } }, now)).toBe("free");
   for (const body of [null, {}, { data: null }, { data: { status: 1, type: "platinum" } }, "text"]) expect(classifyTier(body, now)).toBe("unknown");
   expect([tierCap("paid"), tierCap("free"), tierCap("unknown")]).toEqual([5, 1, 1]);
+});
+
+test("会员详情：保留类型与到期时间，免费账号没有类型，格式不符为 null", () => {
+  const now = Date.parse("2026-10-15T00:00:00Z"), future = "2027-01-01T00:00:00Z";
+  expect(membership({ data: { status: "ok", type: "platinum", expire: future } }, now)).toEqual({ tier: "paid", type: "platinum", expire: Date.parse(future) });
+  expect(membership({ data: { status: "ok", type: "novip", expire: "" } }, now)).toEqual({ tier: "free", type: null, expire: null });
+  expect(membership({ data: null }, now)).toBe(null);
 });
 
 test("等级每 10 分钟刷新；读取失败沿用上次成功的结果并在 1 分钟后重试；从未成功为未知；会员到期后降级", async () => {

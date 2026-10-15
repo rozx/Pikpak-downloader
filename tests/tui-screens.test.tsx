@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { render } from "ink-testing-library";
-import { TuiApp } from "../src/tui/app";
+import { TuiApp, type AccountAction } from "../src/tui/app";
 import { createTheme, type Theme, type Tone } from "../src/tui/theme";
 import { displayWidth } from "../src/tui/format";
 import { RowLine, type Size } from "../src/tui/main-panel";
@@ -11,8 +11,8 @@ import { FakeController, keys, mockSnapshot, settle, stripAnsi } from "./fixture
 
 const mounted: Array<() => void> = [];
 afterEach(() => { for (const unmount of mounted.splice(0)) unmount(); });
-function mount(controller = new FakeController(), size: Size = { columns: 100, rows: 24 }) {
-  const app = render(<TuiApp controller={controller} theme={createTheme({ NO_COLOR: "1" })} size={size} />);
+function mount(controller = new FakeController(), size: Size = { columns: 100, rows: 24 }, onAccount?: (action: AccountAction) => void) {
+  const app = render(<TuiApp controller={controller} theme={createTheme({ NO_COLOR: "1" })} size={size} {...onAccount ? { onAccount } : {}} />);
   mounted.push(app.unmount);
   const frame = () => stripAnsi(app.lastFrame() ?? "");
   const press = async (...inputs: string[]) => { for (const input of inputs) { app.stdin.write(input); await settle(); } };
@@ -134,7 +134,7 @@ test("设置页修改下载目录与剪贴板监听；目录不可用时显示�
   const { controller, frame, press } = mount(); await settle();
   await press("s");
   expect(frame()).toContain("下载目录"); expect(frame()).toContain("● 开"); expect(frame()).toContain("新分享与尚未开始的分享使用新目录");
-  await press(keys.down, " ");
+  await press(keys.down, keys.down, " ");
   expect(controller.commands).toEqual([{ kind: "setClipboardWatch", enabled: false }]);
   await press(keys.up, keys.enter, "\\", "n", "e", "w");
   expect(frame()).toContain("PikPak-Test\\new▌");
@@ -236,7 +236,7 @@ test("设置页调整下载连接数：显示当前值，←→ 发出命令，�
   const { frame, press } = mount(controller); await settle();
   await press("s");
   expect(frame()).toContain("下载连接数"); expect(frame()).toContain("◀ 4 ▶"); expect(frame()).toContain("默认 4");
-  await press(keys.down, keys.down);
+  await press(keys.down, keys.down, keys.down);
   expect(frame()).toContain("←→ 调整");
   await press(keys.right, keys.left);
   expect(controller.commands).toEqual([{ kind: "setDownloadConnections", count: 5 }, { kind: "setDownloadConnections", count: 3 }]);
@@ -246,13 +246,13 @@ test("设置页调整下载连接数：显示当前值，←→ 发出命令，�
   controller.update({ connections: 1 }); await settle();
   await press(keys.left); expect(controller.commands).toHaveLength(2);
   await press(keys.up); expect(frame()).toContain("Enter 修改"); expect(frame()).not.toContain("←→ 调整");
-  await press(keys.up, keys.up); expect(frame()).toContain("←→ 调整");
+  await press(keys.up, keys.up, keys.up); expect(frame()).toContain("←→ 调整");
 });
 
 test("设置页调整同时下载文件数：←→ 发出命令，到达 1 或 5 后不越界；受账号等级限制时说明实际生效值", async () => {
   const controller = new FakeController();
   const { frame, press } = mount(controller); await settle();
-  await press("s", keys.down, keys.down, keys.down);
+  await press("s", keys.down, keys.down, keys.down, keys.down);
   expect(frame()).toContain("同时下载文件数"); expect(frame()).toContain("会员最多 5 个，免费账号只能 1 个"); expect(frame()).toContain("←→ 调整");
   await press(keys.right, keys.left);
   expect(controller.commands).toEqual([{ kind: "setActiveFiles", count: 2 }]);
@@ -428,4 +428,34 @@ test("X 全部释放：确认框说明只处理已完成的任务；没有可释
   controller.update({ releasing: new Set(["f_1"]) }); await settle();
   const line = (name: string) => frame().split("\n").find(item => item.includes(name)) ?? "";
   expect(line("episode01.mkv")).toContain("释放中"); expect(line("「某某合集」")).toContain("· 1 释放中");
+});
+
+test("设置页账号摘要；账号页显示账号、会员、容量与权限，r 重新授权，l 确认后登出", async () => {
+  const actions: AccountAction[] = [];
+  const { controller, frame, press } = mount(new FakeController(), { columns: 100, rows: 24 }, action => { actions.push(action); });
+  await settle(); await press("s");
+  expect(frame()).toContain("演示用户  ·  会员（platinum） · 到期 2027-01-01  ·  权限 完整"); expect(frame()).toContain("Enter 查看");
+  await press(keys.enter);
+  expect(controller.accountRefreshes).toBe(1);
+  for (const part of ["账号", "演示用户  ·  demo@example.com", "synthetic-account", "会员（platinum） · 到期 2027-01-01", "已用 21.0 GB / 共 10 TB（0.2%）",
+    "✓ 账号信息", "files:manage · 转存、下载与释放云端副本", "✓ 分享", "✓ 云下载", "r 重新授权", "l 登出"]) expect(frame()).toContain(part);
+  await press("r"); expect(actions).toEqual(["reauthorize"]);
+  await press("l"); expect(frame()).toContain("停止下载并登出当前账号？");
+  await press("n"); expect(frame()).not.toContain("停止下载并登出当前账号？"); expect(actions).toEqual(["reauthorize"]);
+  await press("l", "y"); expect(actions).toEqual(["reauthorize", "logout"]);
+  await press(keys.escape, keys.escape); expect(frame()).toContain("同时下载文件数");
+});
+
+test("账号页标出缺少的必须权限；授权范围未知或资料未读取时如实说明", async () => {
+  const controller = new FakeController();
+  const { frame, press } = mount(controller); await settle();
+  controller.update({ account: { ...mockSnapshot().account!, scopes: ["account", "share"] } }); await settle();
+  await press("s");
+  expect(frame()).toContain("权限 缺少 管理文件");
+  await press(keys.enter);
+  expect(frame()).toContain("✗ 管理文件"); expect(frame()).toContain("✗ 云下载"); expect(frame()).toContain("缺少必须的权限：管理文件。按 r 重新授权");
+  controller.update({ account: { ...mockSnapshot().account!, scopes: null, membership: null } }); await settle();
+  expect(frame()).toContain("? 管理文件"); expect(frame()).toContain("无法确认已授予的权限"); expect(frame()).toContain("暂不可用");
+  controller.update({ account: null, quota: null }); await settle();
+  expect(frame()).toContain("正在读取…"); expect(frame()).toContain("暂不可用");
 });

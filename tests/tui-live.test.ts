@@ -157,3 +157,18 @@ test("已完成文件的本地文件是否仍在：存在、被删除后标为�
     expect(f.live.snapshot().localMissing.has(f.file.id)).toBe(false);
   } finally { await f.close(); }
 });
+
+test("账号资料在启动与打开账号页时读取；读取失败保留上次结果", async () => {
+  let reads = 0, fail = false;
+  const f = await fixture({ account: async () => { reads++; if (fail) throw Error("synthetic-failure");
+    return { id: "account", name: `用户${reads}`, email: null, scopes: ["account"], membership: null }; } });
+  try {
+    expect(f.live.snapshot().account).toBe(null);
+    f.live.start(); await Bun.sleep(30);
+    expect(f.live.snapshot().account?.name).toBe("用户1");
+    f.live.refreshAccount(); await Bun.sleep(30);
+    expect(f.live.snapshot().account?.name).toBe("用户2");
+    fail = true; f.live.refreshAccount(); await Bun.sleep(30);
+    expect(reads).toBe(3); expect(f.live.snapshot().account?.name).toBe("用户2");
+  } finally { await f.close(); }
+});

@@ -55,7 +55,7 @@ export async function watch(store: Store, output: string | null, signal: AbortSi
 
 // watch 与全屏界面共用的启动准备：核对输出目录与登录会话，组装执行器和前台会话。
 export async function prepareRuntime(store: Store, accountId: string, root: string, filesystem: LocalFileSystem,
-  report: (event: RuntimeEvent) => void): Promise<{ session: RuntimeSession; drive: Drive; tier: AccountTier }> {
+  report: (event: RuntimeEvent) => void): Promise<{ session: RuntimeSession; drive: Drive; tier: AccountTier; manager: SessionManager }> {
   try {
     const validation = await filesystem.root(root);
     try { await validation.identity(); await validation.freeBytes(); } finally { await validation.close(); }
@@ -77,7 +77,7 @@ export async function prepareRuntime(store: Store, accountId: string, root: stri
   const drive = new Drive(client, accountId);
   const tier = new AccountTier(client, accountId, store);
   const engine = new Engine(store, secrets, drive, filesystem, report, undefined, undefined, { tier });
-  return { session: new RuntimeSession(store, accountId, engine, new IntakeReceiver(store, secrets, accountId, root), systemClipboard()), drive, tier };
+  return { session: new RuntimeSession(store, accountId, engine, new IntakeReceiver(store, secrets, accountId, root), systemClipboard()), drive, tier, manager };
 }
 
 // 会话自身的事件转成纯文本提示；执行器事件由创建执行器时传入的 printEvent 输出。

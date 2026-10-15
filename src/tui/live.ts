@@ -3,7 +3,7 @@ import { stat } from "node:fs/promises";
 import type { Store } from "../state/store";
 import type { ReleasePreview, RuntimeEvent } from "../runtime/engine";
 import type { CommandResult, RuntimeSession, SessionCommand } from "../runtime/session";
-import { pastePreview, type LogEntry, type OpenResult, type Progress, type TuiController, type TuiSnapshot } from "./controller";
+import { pastePreview, type AccountView, type LogEntry, type OpenResult, type Progress, type TuiController, type TuiSnapshot } from "./controller";
 import { describeEvent, type LogLine } from "./view-model";
 import { fileName } from "./format";
 import { taskName } from "../download/names";
@@ -17,6 +17,7 @@ export type LiveOptions = {
   store: Store; accountId: string; session: Pick<RuntimeSession, "subscribe" | "command"> & Partial<Pick<RuntimeSession, "releasable" | "releasing">>;
   quota: () => Promise<{ usage: bigint; limit: bigint }>; localFree: () => Promise<bigint>;
   stop: () => void; forceExit: () => void; open?: (path: string) => Promise<OpenResult>; tier?: () => Tier;
+  account?: () => Promise<AccountView>;
   // 本地文件是否存在：true 存在，false 不存在，null 无法判断（保留上次结果）。
   exists?: (path: string) => Promise<boolean | null>;
   now?: () => number; snapshotMs?: number; flushMs?: number; quotaMs?: number; localMs?: number; maxEvents?: number;
@@ -38,6 +39,8 @@ export class LiveController implements TuiController {
   private lastFlush = 0;
   private quota: TuiSnapshot["quota"] = null;
   private localFree: bigint | null = null;
+  private account: AccountView | null = null;
+  private readingAccount = false;
   private missing = new Set<string>();
   private checking = false;
   private clipboard: TuiSnapshot["clipboard"];
@@ -56,7 +59,7 @@ export class LiveController implements TuiController {
     this.timers.push(setInterval(() => this.refresh(), this.options.snapshotMs ?? 500));
     this.timers.push(setInterval(() => void this.refreshQuota(), this.options.quotaMs ?? 60_000));
     this.timers.push(setInterval(() => { void this.refreshLocal(); void this.refreshPresence(); }, this.options.localMs ?? 10_000));
-    void this.refreshQuota(); void this.refreshLocal(); void this.refreshPresence();
+    void this.refreshQuota(); void this.refreshLocal(); void this.refreshPresence(); this.refreshAccount();
   }
   dispose(): void {
     this.unsubscribe?.(); this.unsubscribe = null;
@@ -82,6 +85,12 @@ export class LiveController implements TuiController {
     let root: string;
     try { root = this.options.store.share(this.options.accountId, target.shareId).outputRoot; } catch { return { ok: false, reason: "account_mismatch" }; }
     return (this.options.open ?? openDirectory)(path ? dirname(path) : root);
+  };
+  refreshAccount = (): void => {
+    if (!this.options.account || this.readingAccount) return;
+    this.readingAccount = true;
+    this.options.account().then(account => { this.account = account; this.refresh(); }, () => { /* 读不到时保留上次结果。 */ })
+      .finally(() => { this.readingAccount = false; });
   };
   stop = (): void => { if (this.stopping) return; this.stopping = true; this.refresh(); this.options.stop(); };
   forceExit = (): void => this.options.forceExit();
@@ -149,7 +158,7 @@ export class LiveController implements TuiController {
     return { shares, files, quota: this.quota, localFree: this.localFree, clipboard: this.clipboard,
       userPaused: store.config("queue_paused") === "1", systemPause: store.paused(accountId), progress, events: [...this.events],
       outputRoot: store.config("output_root"), stopping: this.stopping, connections: configuredConnections(store), activeFiles: this.activeFiles(),
-      localMissing: this.missing, releasing: new Set(this.options.session.releasing?.() ?? []) };
+      localMissing: this.missing, releasing: new Set(this.options.session.releasing?.() ?? []), account: this.account };
   }
   private activeFiles(): TuiSnapshot["activeFiles"] {
     const configured = configuredActiveFiles(this.options.store), tier = this.options.tier?.() ?? "unknown";

@@ -121,3 +121,47 @@ test("窗口不足 60×24 时启动画面改为单行标题，登录提示仍然
   expect(text).toContain("按 Enter 在浏览器中打开 PikPak 官方授权页"); expect(text).toContain("Esc 退出");
 });
 
+
+// 按键可能早于输入监听生效：重复按键直到进入账号页。
+async function openAccount(frame: () => string, press: (...inputs: string[]) => Promise<void>) {
+  await eventually(async () => { if (!frame().includes("Enter 查看")) await press("s"); expect(frame()).toContain("Enter 查看"); });
+  await eventually(async () => { if (!frame().includes("r 重新授权")) await press(keys.enter); expect(frame()).toContain("r 重新授权"); });
+}
+
+test("启动时已保存的授权缺少必须的权限：提示重新授权，Esc 暂时继续使用", async () => {
+  const { deps, calls } = fakeDeps({ missing: async () => ["管理文件"] });
+  const { frame, press } = mount(deps);
+  await eventually(() => { expect(frame()).toContain("当前授权缺少必须的权限"); expect(frame()).toContain("✗ 缺少：管理文件"); });
+  expect(frame()).toContain("请全部勾选（必须：账号信息、管理文件、分享）"); expect(frame()).toContain("Esc 返回，继续使用当前授权");
+  expect(calls.started).toEqual([]);
+  await eventually(async () => { if (!calls.started.length) await press(keys.escape); expect(calls.started).toEqual(["account"]); });
+  expect(calls.exits).toEqual([]);
+});
+
+test("账号页登出：先停止执行再清除令牌，回到登录页", async () => {
+  const order: string[] = [];
+  const { deps, calls } = fakeDeps({ suspend: async () => { order.push("suspend"); }, logout: async () => { order.push("logout"); } });
+  const { frame, press } = mount(deps);
+  await openAccount(frame, press);
+  await press("l", "y");
+  await eventually(() => { expect(order).toEqual(["suspend", "logout"]); expect(frame()).toContain("已登出"); expect(frame()).toContain("Esc 退出"); });
+  await eventually(async () => { if (!calls.logins) await press(keys.enter); expect(calls.logins).toBe(1); });
+});
+
+test("账号页重新授权：停止执行后立即授权，取消后 Esc 回到原账号；停止超时显示失败", async () => {
+  let suspends = 0;
+  const { deps, calls } = fakeDeps({ suspend: async () => { suspends++; } });
+  const { frame, press } = mount(deps);
+  await openAccount(frame, press);
+  await press("r");
+  await eventually(() => { expect(suspends).toBe(1); expect(calls.logins).toBe(1); expect(frame()).toContain("重新授权"); expect(frame()).toContain("正在等待浏览器授权"); });
+  await eventually(async () => { if (!calls.signal?.aborted) await press(keys.escape); expect(frame()).toContain("✗ 已取消授权"); });
+  expect(frame()).toContain("Esc 返回，继续使用当前授权");
+  await eventually(async () => { if (calls.started.length < 2) await press(keys.escape); expect(calls.started).toEqual(["account", "account"]); });
+  const stuck = fakeDeps({ suspend: async () => { throw Error("suspend-timeout"); } });
+  const second = mount(stuck.deps);
+  await openAccount(second.frame, second.press);
+  await second.press("r");
+  await eventually(() => expect(second.frame()).toContain("当前下载未能及时停止"));
+  expect(stuck.calls.logins).toBe(0);
+});

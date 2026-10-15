@@ -10,6 +10,7 @@ import { Store } from "./state/store";
 import { systemSecrets } from "./auth/secrets";
 import { SessionManager } from "./auth/session";
 import { login } from "./auth/login";
+import { permissionRows } from "./auth/permissions";
 import { clipboardWorker } from "./intake/clipboard-worker";
 import { watch } from "./runtime/watch";
 import { interruptible } from "./runtime/lifecycle";
@@ -110,6 +111,9 @@ export async function runCli(args: string[]): Promise<void> {
             const account = await login(session, args[1] === "--force");
             store.ensureAccount(account); store.setConfig("active_account", account); store.clearAuthenticationPause(account);
             console.log("登录成功，账号身份与容量读取已核对。");
+            const scopes = await session.scopes();
+            if (!scopes) console.log("服务端未返回授权范围，无法确认已授予的权限；操作被拒绝时请用 login --force 重新授权并勾选全部权限。");
+            else for (const row of permissionRows(scopes)) console.log(`  ${row.state === "granted" ? "✓" : "✗"} ${row.label}（${row.scope}）${row.state === "missing" ? (row.required ? " 缺少" : " 未授予，本工具暂不使用") : ""}`);
           }
           return;
         }

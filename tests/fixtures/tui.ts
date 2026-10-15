@@ -39,6 +39,8 @@ export function mockSnapshot(): TuiSnapshot {
       { at: Date.parse("2026-10-14T22:32:12"), icon: "✗", tone: "error", text: "part1.mp4 下载失败" },
       { at: Date.parse("2026-10-14T22:33:40"), icon: "✓", tone: "done", text: "episode01.mkv 校验通过，已完成" }],
     outputRoot: "C:\\Users\\demo\\Downloads\\PikPak-Test", stopping: false, connections: 4, activeFiles: { configured: 1, effective: 1, tier: "paid" }, localMissing: new Set<string>(), releasing: new Set<string>(),
+    account: { id: "synthetic-account", name: "演示用户", email: "demo@example.com", scopes: ["account", "files:manage", "share", "cloud_download"],
+      membership: { tier: "paid", type: "platinum", expire: Date.parse("2027-01-01T00:00:00Z") } },
   };
 }
 
@@ -48,7 +50,7 @@ export class FakeController implements TuiController {
   readonly commands: SessionCommand[] = [];
   readonly notes: LogLine[] = [];
   readonly opened: Array<{ shareId: string; fileId?: string }> = [];
-  stops = 0; forced = 0;
+  stops = 0; forced = 0; accountRefreshes = 0;
   result: CommandResult = { ok: true, ids: [], issues: [] };
   openResult: OpenResult = { ok: true };
   release: ReleasePreview = { ok: true, copies: 1, bytes: 412n * 1048576n, unfinished: 0, removed: 1 };
@@ -63,6 +65,7 @@ export class FakeController implements TuiController {
   targetPath = (fileId: string) => fileId === "f_4" ? "C:\\Users\\demo\\Downloads\\PikPak-Test\\纪录片合集\\part1.mp4" : null;
   openDirectory = async (target: { shareId: string; fileId?: string }) => { this.opened.push(target); return this.openResult; };
   releasePreview = (id: string | null) => { this.previews.push(id ?? "*"); return this.release; };
+  refreshAccount = () => { this.accountRefreshes++; };
   stop = () => { this.stops++; };
   forceExit = () => { this.forced++; };
 }

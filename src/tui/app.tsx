@@ -4,7 +4,7 @@ import type { TuiController } from "./controller";
 import { createTheme, type Theme } from "./theme";
 import { buildRows, explain, scrollOffset, selectable, type Row } from "./view-model";
 import { MainPanel, MIN_COLUMNS, MIN_ROWS, panelLayout, type Size } from "./main-panel";
-import { CONFIRM_LINES, ConfirmDialog, DetailPage, PASTE_BOX_LINES, PasteBox, SETTINGS_ITEMS, SettingsPage } from "./pages";
+import { AccountPage, CONFIRM_LINES, ConfirmDialog, DetailPage, PASTE_BOX_LINES, PasteBox, SETTINGS_ITEMS, SettingsPage } from "./pages";
 import { MAX_CONNECTIONS } from "../download/connections";
 import { MAX_ACTIVE_FILES } from "../runtime/active-files";
 import { formatBytes } from "./format";
@@ -18,10 +18,12 @@ function releaseDetail(preview: Extract<ReleasePreview, { ok: true }>): string {
   return "永久删除 PikPak 中的副本：已完成的删除任务记录，未完成的保留断点、继续时从分享重新转存。";
 }
 
-type Screen = { kind: "main" } | { kind: "detail"; fileId: string } | { kind: "settings" } | { kind: "paste" }
+type Screen = { kind: "main" } | { kind: "detail"; fileId: string } | { kind: "settings" } | { kind: "account"; confirming: boolean } | { kind: "paste" }
   | { kind: "confirm"; action: "cancel" | "release" | "releaseAll"; id: string; title: string; release?: Extract<ReleasePreview, { ok: true }>; back: Screen } | { kind: "quit" };
 
-export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: { controller: TuiController; theme?: Theme; size?: Size }) {
+// 账号页的登出与重新授权交给启动流程处理：先停止执行，再进入登录页（improve-account-login 决策 6）。
+export type AccountAction = "logout" | "reauthorize";
+export function TuiApp({ controller, theme = createTheme(), size: fixedSize, onAccount }: { controller: TuiController; theme?: Theme; size?: Size; onAccount?: (action: AccountAction) => void }) {
   const windowSize = useWindowSize();
   const size = fixedSize ?? windowSize;
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
@@ -189,17 +191,28 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
     }
     if (key.escape) setScreen({ kind: "main" });
     else if (key.upArrow || key.downArrow) setSetting(value => ({ ...value, selected: (value.selected + (key.downArrow ? 1 : SETTINGS_ITEMS - 1)) % SETTINGS_ITEMS, error: null }));
-    else if (setting.selected === 0 && key.return) { setDraft(snapshot.outputRoot ?? ""); setSetting(value => ({ ...value, editing: true, error: null })); }
-    else if (setting.selected === 1 && (key.return || input === " ")) void run({ kind: "setClipboardWatch", enabled: snapshot.clipboard === "off" });
-    else if (setting.selected === 2 && (key.leftArrow || key.rightArrow)) {
+    else if (setting.selected === 0 && key.return) { controller.refreshAccount(); setScreen({ kind: "account", confirming: false }); }
+    else if (setting.selected === 1 && key.return) { setDraft(snapshot.outputRoot ?? ""); setSetting(value => ({ ...value, editing: true, error: null })); }
+    else if (setting.selected === 2 && (key.return || input === " ")) void run({ kind: "setClipboardWatch", enabled: snapshot.clipboard === "off" });
+    else if (setting.selected === 3 && (key.leftArrow || key.rightArrow)) {
       // 到达 1 或上限时不再发出命令。
       const count = snapshot.connections + (key.rightArrow ? 1 : -1);
       if (count >= 1 && count <= MAX_CONNECTIONS) void run({ kind: "setDownloadConnections", count });
-    } else if (setting.selected === 3 && (key.leftArrow || key.rightArrow)) {
+    } else if (setting.selected === 4 && (key.leftArrow || key.rightArrow)) {
       const count = snapshot.activeFiles.configured + (key.rightArrow ? 1 : -1);
       if (count >= 1 && count <= MAX_ACTIVE_FILES) void run({ kind: "setActiveFiles", count });
     }
   }, { isActive: screen.kind === "settings" });
+
+  useInput((input, key) => {
+    if (screen.kind !== "account") return;
+    if (screen.confirming) {
+      if (input === "y") onAccount?.("logout");
+      else if (input === "n" || key.escape) setScreen({ kind: "account", confirming: false });
+    } else if (key.escape) setScreen({ kind: "settings" });
+    else if (input === "r") onAccount?.("reauthorize");
+    else if (input === "l") setScreen({ kind: "account", confirming: true });
+  }, { isActive: screen.kind === "account" && !snapshot.stopping });
 
   if (size.columns < MIN_COLUMNS || size.rows < MIN_ROWS) {
     return <Text {...theme.paint("warning")}>窗口太小（{size.columns}×{size.rows}），请放大到至少 {MIN_COLUMNS}×{MIN_ROWS}</Text>;
@@ -209,8 +222,9 @@ export function TuiApp({ controller, theme = createTheme(), size: fixedSize }: {
     return <DetailPage file={detailFile} shareTitle={share?.title ?? detailFile.shareId} targetPath={controller.targetPath(detailFile.id)} userPaused={snapshot.userPaused}
       missing={snapshot.localMissing.has(detailFile.id)} releasing={snapshot.releasing.has(detailFile.id)} size={size} theme={theme} />;
   }
+  if (screen.kind === "account") return <AccountPage account={snapshot.account} quota={snapshot.quota} confirming={screen.confirming} size={size} theme={theme} />;
   if (screen.kind === "settings") {
-    return <SettingsPage outputRoot={snapshot.outputRoot} clipboardOn={snapshot.clipboard !== "off"} connections={snapshot.connections} activeFiles={snapshot.activeFiles} selected={setting.selected} editing={setting.editing}
+    return <SettingsPage account={snapshot.account} outputRoot={snapshot.outputRoot} clipboardOn={snapshot.clipboard !== "off"} connections={snapshot.connections} activeFiles={snapshot.activeFiles} selected={setting.selected} editing={setting.editing}
       draft={draft} error={setting.error} size={size} theme={theme} />;
   }
   const keys: Array<[string, string]> = screen.kind === "confirm" ? [["y", "确认"], ["n", "返回"]]

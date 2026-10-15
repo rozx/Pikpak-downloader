@@ -4,7 +4,7 @@ import type { CommandResult, SessionCommand } from "../runtime/session";
 import type { ReleasePreview } from "../runtime/engine";
 import { parseShares } from "../intake/parse";
 import type { LogLine } from "./view-model";
-import type { Tier } from "../pikpak/tier";
+import type { Membership, Tier } from "../pikpak/tier";
 
 export type Progress = { bytes: bigint; size: bigint; rate: number | null; eta: number | null };
 export type LogEntry = LogLine & { at: number };
@@ -19,7 +19,11 @@ export type TuiSnapshot = {
   localMissing: ReadonlySet<string>;
   // 正在释放云端副本的文件 ID。
   releasing: ReadonlySet<string>;
+  // 账号资料；尚未读取时为 null。
+  account: AccountView | null;
 };
+// 账号页的资料（improve-account-login 决策 5）：读不到的部分为 null。
+export type AccountView = { id: string; name: string | null; email: string | null; scopes: string[] | null; membership: Membership | null };
 export type PastePreview = { shares: number; paired: number; issues: string[] };
 export type OpenResult = { ok: true } | { ok: false; reason: string };
 
@@ -35,6 +39,8 @@ export interface TuiController {
   // id 为 null 时预览全部释放（只含已完成的任务）。
   releasePreview(id: string | null): ReleasePreview;
   openDirectory(target: { shareId: string; fileId?: string }): Promise<OpenResult>;
+  // 重新读取账号资料（打开账号页时）。
+  refreshAccount(): void;
   stop(): void;
   forceExit(): void;
 }

@@ -16,6 +16,16 @@ export function classifyTier(body: unknown, now = Date.now()): Tier {
   return status === "ok" && type !== "" && type !== "novip" && Number.isFinite(end) && end > now ? "paid" : "free";
 }
 
+// 账号页显示的会员详情（improve-account-login 决策 5）：类型与到期时间，读不到时为 null。
+export type Membership = { tier: Exclude<Tier, "unknown">; type: string | null; expire: number | null };
+export function membership(body: unknown, now = Date.now()): Membership | null {
+  const tier = classifyTier(body, now);
+  if (tier === "unknown") return null;
+  const { type, expire } = (body as { data: Record<string, unknown> }).data;
+  const end = typeof expire === "string" ? Date.parse(expire) : NaN;
+  return { tier, type: typeof type === "string" && type && type !== "novip" ? type : null, expire: Number.isFinite(end) ? end : null };
+}
+
 // 上一次成功读取的等级写入配置，供 status 离线显示；会话内的生效值只取本次会话读到的结果。
 export type StoredTier = { account: string; tier: Exclude<Tier, "unknown">; at: number };
 export function storedTier(store: Pick<Store, "config">, account: string): StoredTier | null {
@@ -27,6 +37,7 @@ export function storedTier(store: Pick<Store, "config">, account: string): Store
 
 export class AccountTier {
   private value: Tier = "unknown";
+  private detail: Membership | null = null;
   private due = -Infinity;
   private reading: Promise<Tier> | null = null;
   // 成功后每 refreshMs 刷新一次；失败时沿用上一次成功的结果，retryMs 后再试。
@@ -35,6 +46,7 @@ export class AccountTier {
     readonly refreshMs = 600_000, readonly retryMs = 60_000) {}
   get current(): Tier { return this.value; }
   get cap(): number { return tierCap(this.value); }
+  get membership(): Membership | null { return this.detail; }
   refresh(signal?: AbortSignal): Promise<Tier> {
     if (this.reading) return this.reading;
     if (this.now() < this.due) return Promise.resolve(this.value);
@@ -43,7 +55,7 @@ export class AccountTier {
         const body = await this.api.request(this.accountId, "/drive/v1/privilege/vip", signal ? { signal } : {}, undefined, { quiet: true });
         const tier = classifyTier(body, this.now());
         if (tier !== "unknown") {
-          this.value = tier; this.due = this.now() + this.refreshMs;
+          this.value = tier; this.detail = membership(body, this.now()); this.due = this.now() + this.refreshMs;
           this.store?.setConfig("account_tier", JSON.stringify({ account: this.accountId, tier, at: this.now() } satisfies StoredTier));
           return this.value;
         }

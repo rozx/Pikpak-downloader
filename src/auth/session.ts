@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { AppError } from "../errors";
 import type { SecretStore } from "../platform/types";
-import { discover, identity, quotaReadable, refresh, register, transport, type Client, type Tokens, type Transport } from "../pikpak/protocol";
+import { discover, identity, profile, quotaReadable, refresh, register, transport, type Client, type Profile, type Tokens, type Transport } from "../pikpak/protocol";
+import { grantedScopes } from "./permissions";
 
-type Session = { accountId: string; clientId: string; accessKey: string; refreshKey?: string; expiresAt: number };
+// scopes：服务端授予的授权范围；旧记录或服务端未返回时省略，读作未知。
+type Session = { accountId: string; clientId: string; accessKey: string; refreshKey?: string; expiresAt: number; scopes?: string[] };
 type Pending = { candidate: Session; cleanup: string[]; phase: "preparing" | "ready" };
 const tokenReference = (value: unknown): value is string => typeof value === "string" && /^session\.[0-9a-f-]{36}\.(access|refresh)$/.test(value);
 function parseSession(raw: string): Session {
@@ -13,7 +15,8 @@ function parseSession(raw: string): Session {
   const record = value as Record<string, unknown>;
   if (typeof record.accountId !== "string" || !record.accountId || typeof record.clientId !== "string" || !record.clientId
     || !tokenReference(record.accessKey) || (record.refreshKey !== undefined && !tokenReference(record.refreshKey))
-    || typeof record.expiresAt !== "number" || !Number.isFinite(record.expiresAt)) throw new AppError("credentials_unavailable");
+    || typeof record.expiresAt !== "number" || !Number.isFinite(record.expiresAt)
+    || (record.scopes !== undefined && !(Array.isArray(record.scopes) && record.scopes.every(item => typeof item === "string")))) throw new AppError("credentials_unavailable");
   return record as Session;
 }
 const keys = (session: Session | null): string[] => session ? [session.accessKey, ...(session.refreshKey ? [session.refreshKey] : [])] : [];
@@ -69,14 +72,16 @@ export class SessionManager {
     await this.secrets.set("openid-client.v1", JSON.stringify(client));
     return client;
   }
-  private async save(tokens: Tokens, accountId: string, client: Client, previousRefresh?: string): Promise<void> {
+  private async save(tokens: Tokens, accountId: string, client: Client, previousRefresh?: string, previousScopes?: string[]): Promise<void> {
     const old = await this.current();
     const prior = await this.pending();
     const generation = randomUUID();
     const refreshValue = tokens.refreshToken ?? previousRefresh;
+    // 刷新响应不带授权范围时沿用上一代。
+    const scopes = grantedScopes(tokens) ?? previousScopes;
     const candidate: Session = { accountId, clientId: client.clientId, accessKey: `session.${generation}.access`,
       ...(refreshValue ? { refreshKey: `session.${generation}.refresh` } : {}),
-      expiresAt: this.now() + Math.max(0, tokens.expiresIn) * 1000 };
+      expiresAt: this.now() + Math.max(0, tokens.expiresIn) * 1000, ...(scopes ? { scopes } : {}) };
     const pending: Pending = { candidate, cleanup: [...new Set([...keys(old), ...(prior ? [...keys(prior.candidate), ...prior.cleanup] : [])])], phase: "preparing" };
     await this.secrets.set("session.pending", JSON.stringify(pending));
     await this.secrets.set(candidate.accessKey, tokens.accessToken);
@@ -109,7 +114,7 @@ export class SessionManager {
       if (client.clientId !== session.clientId) throw new AppError("account_mismatch");
       const renewed = await refresh(client, refreshValue, this.http);
       if (await identity(renewed.accessToken, this.http) !== expected) throw new AppError("account_mismatch");
-      await this.save(renewed, expected, client, refreshValue);
+      await this.save(renewed, expected, client, refreshValue, session.scopes);
       return { accountId: expected, token: renewed.accessToken, renewed: true };
     } catch (error) { this.blocked = true; this.onFailure(expected); throw error; }
   }
@@ -128,6 +133,16 @@ export class SessionManager {
     if (await identity(token, this.http) !== session.accountId) throw new AppError("account_mismatch");
     await quotaReadable(token, this.http);
     return session.accountId;
+  }
+  // 当前会话的授权范围；没有会话或未知时为 null。
+  async scopes(): Promise<string[] | null> {
+    await this.recover();
+    return (await this.current())?.scopes ?? null;
+  }
+  async profile(expected: string): Promise<Profile> {
+    const result = await profile(await this.access(expected), this.http);
+    if (result.id !== expected) throw new AppError("account_mismatch");
+    return result;
   }
   async logout(): Promise<void> {
     this.blocked = true;

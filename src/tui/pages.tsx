@@ -10,7 +10,8 @@ import { about } from "../about";
 import { DEFAULT_CONNECTIONS, MAX_CONNECTIONS } from "../download/connections";
 import { DEFAULT_ACTIVE_FILES, MAX_ACTIVE_FILES } from "../runtime/active-files";
 import { PAID_ACTIVE_FILES } from "../pikpak/tier";
-import type { TuiSnapshot } from "./controller";
+import type { AccountView, TuiSnapshot } from "./controller";
+import { missingPermissions, permissionNames, permissionRows } from "../auth/permissions";
 
 const copyStates: Record<string, string> = { retained: "保留中 · 按 x 可立即释放", deleting: "删除中", deleted: "已删除 · 不在云盘中", protected: "受保护 · 不会自动删除" };
 // 本地文件一行（add-task-controls 决策 6）：已完成看交付的文件是否仍在，未完成看断点。
@@ -46,11 +47,27 @@ export function DetailPage({ file, shareTitle, targetPath, userPaused, missing =
   );
 }
 
-export const SETTINGS_ITEMS = 4;
+// 账号摘要与会员说明（improve-account-login 决策 6）。
+const accountName = (account: AccountView) => account.name ?? account.email ?? account.id;
+const day = (time: number) => { const date = new Date(time); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; };
+function membershipText(account: AccountView | null): [string, Tone] {
+  const value = account?.membership;
+  if (!value) return ["暂不可用", "muted"];
+  if (value.tier === "free") return ["免费账号", "text"];
+  return [`会员${value.type ? `（${value.type}）` : ""}${value.expire ? ` · 到期 ${day(value.expire)}` : ""}`, "done"];
+}
+function permissionSummary(account: AccountView | null): [string, Tone] {
+  if (!account) return ["暂不可用", "muted"];
+  if (!account.scopes) return ["无法确认", "muted"];
+  const missing = missingPermissions(account.scopes);
+  return missing.length ? [`缺少 ${permissionNames(missing)}`, "error"] : ["完整", "done"];
+}
+
+export const SETTINGS_ITEMS = 5;
 // 受账号等级限制时说明实际生效值的原因。
 const tierReason = (tier: TuiSnapshot["activeFiles"]["tier"]) => tier === "free" ? "免费账号同时只能下载 1 个文件" : "暂时无法读取账号等级，同时只下载 1 个文件";
-export function SettingsPage({ outputRoot, clipboardOn, connections, activeFiles, selected, editing, draft, error, size, theme }: {
-  outputRoot: string | null; clipboardOn: boolean; connections: number; activeFiles: TuiSnapshot["activeFiles"]; selected: number; editing: boolean; draft: string;
+export function SettingsPage({ account, outputRoot, clipboardOn, connections, activeFiles, selected, editing, draft, error, size, theme }: {
+  account: AccountView | null; outputRoot: string | null; clipboardOn: boolean; connections: number; activeFiles: TuiSnapshot["activeFiles"]; selected: number; editing: boolean; draft: string;
   error: string | null; size: Size; theme: Theme;
 }) {
   const item = (index: number, label: string, value: (on: boolean) => React.ReactNode, note: string) => {
@@ -71,18 +88,25 @@ export function SettingsPage({ outputRoot, clipboardOn, connections, activeFiles
       <Title text="设置" theme={theme} />
       <Rule width={size.columns - 2} theme={theme} />
       <Box flexDirection="column" flexGrow={1} paddingTop={1} gap={1}>
-        {item(0, "下载目录", on => editing
+        {item(0, "账号", on => {
+          const [member, memberTone] = membershipText(account), [permission, permissionTone] = permissionSummary(account);
+          return <Text wrap="truncate-end">
+            <Text {...theme.paint("strong", on)}>{account ? accountName(account) : "正在读取…"}</Text><Text {...theme.paint("muted", on)}>  ·  </Text>
+            <Text {...theme.paint(memberTone, on)}>{member}</Text><Text {...theme.paint("muted", on)}>  ·  权限 </Text><Text {...theme.paint(permissionTone, on)}>{permission}</Text>
+          </Text>;
+        }, "按 Enter 查看账号、会员、容量与授权权限，可重新授权或登出")}
+        {item(1, "下载目录", on => editing
           ? <Text {...theme.paint("strong", on)}>{draft}<Text {...theme.paint("key", on)}>▌</Text></Text>
           : <Text {...theme.paint("strong", on)}>{truncateMiddle(outputRoot ?? "未设置", size.columns - 22)}</Text>,
           editing ? "输入或粘贴目录后按 Enter 保存，Esc 放弃" : "新分享与尚未开始的分享使用新目录；已开始或已完成的分享保留原目录")}
-        {item(1, "剪贴板监听", on => <Text {...theme.paint(clipboardOn ? "done" : "muted", on)}>{clipboardOn ? "● 开" : "○ 关"}</Text>, "关闭后只能用 a 粘贴分享文本")}
-        {item(2, "下载连接数", on => (
+        {item(2, "剪贴板监听", on => <Text {...theme.paint(clipboardOn ? "done" : "muted", on)}>{clipboardOn ? "● 开" : "○ 关"}</Text>, "关闭后只能用 a 粘贴分享文本")}
+        {item(3, "下载连接数", on => (
           <Text>
             <Text {...theme.paint(connections > 1 ? "key" : "muted", on)}>◀ </Text><Text {...theme.paint("strong", on)} bold>{connections}</Text>
             <Text {...theme.paint(connections < MAX_CONNECTIONS ? "key" : "muted", on)}> ▶</Text>
           </Text>
         ), `单个文件同时使用的连接数，1–${MAX_CONNECTIONS}，默认 ${DEFAULT_CONNECTIONS}；从下一个文件开始生效`)}
-        {item(3, "同时下载文件数", on => (
+        {item(4, "同时下载文件数", on => (
           <Text>
             <Text {...theme.paint(activeFiles.configured > 1 ? "key" : "muted", on)}>◀ </Text><Text {...theme.paint("strong", on)} bold>{activeFiles.configured}</Text>
             <Text {...theme.paint(activeFiles.configured < MAX_ACTIVE_FILES ? "key" : "muted", on)}> ▶</Text>
@@ -100,8 +124,50 @@ export function SettingsPage({ outputRoot, clipboardOn, connections, activeFiles
         </Box>
       </Box>
       <Rule width={size.columns - 2} theme={theme} />
-      <Keys items={editing ? [["Enter", "保存"], ["Esc", "放弃"]] : selected >= 2 ? [["↑↓", "选择"], ["←→", "调整"], ["Esc", "返回"]]
+      <Keys items={editing ? [["Enter", "保存"], ["Esc", "放弃"]] : selected >= 3 ? [["↑↓", "选择"], ["←→", "调整"], ["Esc", "返回"]]
+        : selected === 0 ? [["↑↓", "选择"], ["Enter", "查看"], ["Esc", "返回"]]
         : [["↑↓", "选择"], ["Enter", "修改"], ["Space", "切换"], ["Esc", "返回"]]} theme={theme} />
+    </Box>
+  );
+}
+
+const permissionLook = { granted: { icon: "✓", tone: "done" }, missing: { icon: "✗", tone: "error" }, unknown: { icon: "?", tone: "muted" } } as const;
+// 账号页（improve-account-login 决策 6）：账号、会员、容量与授权权限；r 重新授权，l 登出（需确认）。
+export function AccountPage({ account, quota, confirming, size, theme }: {
+  account: AccountView | null; quota: TuiSnapshot["quota"]; confirming: boolean; size: Size; theme: Theme;
+}) {
+  const [member, memberTone] = membershipText(account);
+  const fields: Array<[string, string, Tone]> = [
+    ["账号", account ? [account.name, account.email].filter(Boolean).join("  ·  ") || "暂不可用" : "正在读取…", account?.name || account?.email ? "strong" : "muted"],
+    ["账号 ID", account?.id ?? "暂不可用", account ? "text" : "muted"],
+    ["会员", member, memberTone],
+    ["云盘容量", quota ? `已用 ${formatBytes(quota.usage, true)} / 共 ${formatBytes(quota.limit)}${quota.limit > 0n ? `（${(Number(quota.usage * 1000n / quota.limit) / 10).toFixed(1)}%）` : ""}` : "暂不可用", quota ? "text" : "muted"],
+  ];
+  const missing = account ? missingPermissions(account.scopes) : [];
+  return (
+    <Box flexDirection="column" height={size.rows} paddingX={1}>
+      <Title text="账号" theme={theme} />
+      <Rule width={size.columns - 2} theme={theme} />
+      <Box flexDirection="column" flexGrow={1} paddingTop={1}>
+        {fields.map(([label, value, tone]) => (
+          <Box key={label}><Box width={12} flexShrink={0}><Text {...theme.paint("muted")}>  {label}</Text></Box><Text {...theme.paint(tone)} wrap="truncate-end">{value}</Text></Box>
+        ))}
+        <Box marginTop={1}><Box width={12} flexShrink={0}><Text {...theme.paint("muted")}>  授权权限</Text></Box>
+          <Box flexDirection="column">
+            {account ? permissionRows(account.scopes).map(row => {
+              const look = permissionLook[row.state], tone = row.state === "missing" && !row.required ? "muted" : look.tone;
+              return <Box key={row.scope}><Box width={12} flexShrink={0}><Text {...theme.paint(tone)}>{look.icon} {row.label}</Text></Box>
+                <Text {...theme.paint("muted")} wrap="truncate-end">{row.scope} · {row.use}{row.required ? "" : "（可选）"}</Text></Box>;
+            }) : <Text {...theme.paint("muted")}>正在读取…</Text>}
+          </Box>
+        </Box>
+        {missing.length > 0 && <Text {...theme.paint("error")}>  ✗ 缺少必须的权限：{permissionNames(missing)}。按 r 重新授权，并在授权页勾选全部权限。</Text>}
+        {account && !account.scopes && <Text {...theme.paint("muted")}>  服务端未返回授权范围，无法确认已授予的权限；操作被拒绝时按 r 重新授权。</Text>}
+        {confirming && <Box marginTop={1}><ConfirmDialog heading="登出" title="停止下载并登出当前账号？" confirm="确认登出" theme={theme}
+          detail="下载在安全点停止并清除令牌；任务、分享资料与本地文件保留。" /></Box>}
+      </Box>
+      <Rule width={size.columns - 2} theme={theme} />
+      <Keys items={confirming ? [["y", "确认登出"], ["n", "返回"]] : [["r", "重新授权"], ["l", "登出"], ["Esc", "返回"]]} theme={theme} />
     </Box>
   );
 }

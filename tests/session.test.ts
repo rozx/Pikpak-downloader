@@ -107,6 +107,19 @@ test("登出只清除认证令牌，分享资料保留，重新登录同账号�
   expect(await f.manager.access("account")).toBe("old-access");
 });
 
+test("会话记录保存授权范围，刷新响应不带范围时沿用；账号资料核对身份", async () => {
+  const secrets = new Secrets(); const { http } = provider();
+  await secrets.set("openid-client.v1", JSON.stringify(client));
+  const manager = new SessionManager(secrets, http);
+  expect(await manager.scopes()).toBe(null);
+  await manager.accept({ accessToken: "old-access", refreshToken: "old-refresh", expiresIn: 0, scope: ["account", "files:manage", "share"] }, client);
+  expect(await manager.scopes()).toEqual(["account", "files:manage", "share"]);
+  expect(await manager.access("account")).toBe("new-access");
+  expect(await manager.scopes()).toEqual(["account", "files:manage", "share"]);
+  expect(await manager.profile("account")).toEqual({ id: "account", name: null, email: null });
+  await manager.logout(); expect(await manager.scopes()).toBe(null);
+});
+
 test("账号不匹配阻止写入，权限拒绝暂停且不盲目重发写请求", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pikpak-auth-test-")); const store = new Store(join(dir, "db.sqlite"));
   try {
