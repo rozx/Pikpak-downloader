@@ -101,13 +101,16 @@ export function fileLocation(file: FileView, missing = false): Location {
 }
 
 export type ShareCounts = { total: number; completed: number; downloading: number; transferring: number; queued: number; paused: number; failed: number; waiting: number; cancelled: number;
-  cloud: number; missing: number };
+  local: number; partial: number; cloud: number; missing: number };
+// 分享的位置：有已完成且在本地的文件即为本地，否则有下载了一部分的文件即为部分；有文件在云端即为云端。
+export const shareLocation = (counts: ShareCounts): Location => ({ local: counts.local ? "full" : counts.partial ? "partial" : null, cloud: counts.cloud > 0 });
 export function shareCounts(files: FileView[], userPaused: boolean, sharePaused = false, missing: ReadonlySet<string> = new Set()): ShareCounts {
-  const counts: ShareCounts = { total: files.length, completed: 0, downloading: 0, transferring: 0, queued: 0, paused: 0, failed: 0, waiting: 0, cancelled: 0, cloud: 0, missing: 0 };
+  const counts: ShareCounts = { total: files.length, completed: 0, downloading: 0, transferring: 0, queued: 0, paused: 0, failed: 0, waiting: 0, cancelled: 0,
+    local: 0, partial: 0, cloud: 0, missing: 0 };
   for (const file of files) {
     const location = fileLocation(file, missing.has(file.id));
     if (location.cloud) counts.cloud++;
-    if (location.local === "missing") counts.missing++;
+    if (location.local) counts[location.local === "full" ? "local" : location.local]++;
     if (file.state === "completed") counts.completed++;
     else if (file.cancelled) counts.cancelled++;
     else if (file.paused || sharePaused) counts.paused++;

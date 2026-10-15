@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { fileStates, type FileState } from "../src/state/model";
 import type { FileView, ShareView } from "../src/state/store";
-import { buildRows, describeEvent, explain, fileLocation, fileLook, knownReasons, pauseExplanation, scrollOffset, selectable, shareCounts, type ListRow } from "../src/tui/view-model";
+import { buildRows, describeEvent, explain, fileLocation, fileLook, knownReasons, pauseExplanation, scrollOffset, selectable, shareCounts, shareLocation, type ListRow } from "../src/tui/view-model";
 
 const summary = (status: string, total: number, completed: number) => ({ status, total, completed, cancelled: 0, failed: 0, waiting: 0, active: total - completed, reason: null });
 const share = (id: string, status: string, total: number, completed: number): ShareView =>
@@ -102,7 +102,10 @@ test("任务位置：已完成看本地文件是否仍在，未完成看断点�
   expect(fileLook(done, { userPaused: false })).toEqual({ icon: "✓", tone: "done", label: "已完成" });
   for (const state of ["retained", "deleting", "protected"] as const) expect(fileLocation({ ...done, copyState: state }).cloud).toBe(true);
   expect(fileLocation({ ...done, copyState: "deleted" }).cloud).toBe(false);
-  expect(shareCounts([done, partial, fresh, { ...done, id: "d", copyState: "retained" }], false, false, new Set(["a"]))).toMatchObject({ cloud: 2, missing: 1 });
+  expect(shareCounts([done, partial, fresh, { ...done, id: "d", copyState: "retained" }], false, false, new Set(["a"]))).toMatchObject({ cloud: 2, missing: 1, local: 1, partial: 1 });
+  expect(shareLocation(shareCounts([done], false))).toEqual({ local: "full", cloud: false });
+  expect(shareLocation(shareCounts([partial, fresh], false))).toEqual({ local: "partial", cloud: true });
+  expect(shareLocation(shareCounts([fresh], false))).toEqual({ local: null, cloud: false });
   const rows = buildRows({ shares: [share("s_1", "partial", 2, 1)], files: { s_1: [done, partial] }, expanded: {}, userPaused: false, missing: new Set(["a"]) });
   expect(rows.flatMap(row => row.kind === "file" ? [row.location] : [])).toEqual([{ local: "missing", cloud: false }, { local: "partial", cloud: true }]);
 });

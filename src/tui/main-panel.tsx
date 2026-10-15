@@ -2,8 +2,8 @@ import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 import type { Theme, Tone } from "./theme";
 import type { TuiSnapshot } from "./controller";
-import { displayWidth, formatBytes, formatDuration, formatSpeed, truncateMiddle } from "./format";
-import type { ListRow, Row, ShareCounts } from "./view-model";
+import { formatBytes, formatDuration, formatSpeed, truncateMiddle } from "./format";
+import { shareLocation, type ListRow, type Location, type Row, type ShareCounts } from "./view-model";
 import { Banners, Bar, Header, Keys, Rule, SPINNER, bannerLines, boxHighlight, creditLabel, textHighlight, useSpinner } from "./parts";
 
 export type Size = { columns: number; rows: number };
@@ -14,11 +14,19 @@ export function panelLayout(size: Size, snapshot: TuiSnapshot, overlayLines = 0)
   const eventLines = Math.min(EVENT_LINES, snapshot.events.length || 1);
   return { listHeight: Math.max(1, size.rows - 1 - bannerLines(snapshot) - 3 - eventLines - 1 - overlayLines), eventLines };
 }
-const nameWidthFor = (columns: number) => Math.max(18, Math.min(48, columns - 72));
-// 云端标记（add-task-controls 决策 6）：单宽文本符号（不带 emoji 变体选择符），淡蓝色，放在分享行与文件行的最左一格，上下对齐。
-export const CLOUD_MARK = "\u2601";
-function CloudSlot({ cloud, theme, selected }: { cloud: boolean; theme: Theme; selected: boolean }) {
-  return <Text {...theme.paint("cloud", selected)}>{cloud ? CLOUD_MARK : " "} </Text>;
+// 名称之外：缩进与选中标记、状态图标、位置格、大小与状态合计约 77 列。
+const nameWidthFor = (columns: number) => Math.max(18, Math.min(48, columns - 77));
+// 位置格（add-task-controls 决策 6）：紧贴在分享标题与文件名前面，两个单宽文本符号各占固定一列（不用 emoji）：
+// ⌂ 本地（绿色；下载了一部分时为灰色），☁ 云端（淡蓝色）。⌂☁ 两处都有，⌂ 只在本地，☁ 只在云端，留空表示都不在。
+export const LOCAL_MARK = "\u2302", CLOUD_MARK = "\u2601";
+function LocationSlot({ location, theme, selected }: { location: Location; theme: Theme; selected: boolean }) {
+  const local = location.local === "full" || location.local === "partial";
+  return (
+    <Text>
+      <Text {...theme.paint(location.local === "full" ? "done" : "muted", selected)}>{local ? LOCAL_MARK : " "}</Text>
+      <Text {...theme.paint("cloud", selected)}>{location.cloud ? CLOUD_MARK : " "}</Text><Text> </Text>
+    </Text>
+  );
 }
 
 // 选中行的全部文字都改用选中调色板，保证在选中背景上可读。
@@ -62,21 +70,16 @@ function FileStatus({ row, snapshot, theme, selected }: { row: Extract<Row, { ki
 // frame 不为 null 时，正在执行的文件与扫描中的分享显示动态图标。
 export function RowLine({ row, selected, snapshot, theme, columns, frame = null }: { row: ListRow; selected: boolean; snapshot: TuiSnapshot; theme: Theme; columns: number; frame?: number | null }) {
   if (row.kind === "group") {
-    // 分组行：粗体的本地下载目录，后接一条灰色细虚线延伸到行尾；路径过长时从中间省略。
-    const path = truncateMiddle(row.path, Math.max(10, columns - 12));
-    return (
-      <Text wrap="truncate-end">
-        <Text {...theme.paint("strong")} bold>{path}</Text><Text {...theme.paint("muted")}> {"┈".repeat(Math.max(2, columns - 3 - displayWidth(path)))}</Text>
-      </Text>
-    );
+    // 分组行：粗体加下划线的本地下载目录；分享行比它缩进一级。路径过长时从中间省略。
+    return <Text {...theme.paint("strong")} bold underline wrap="truncate-end">{truncateMiddle(row.path, Math.max(10, columns - 4))}</Text>;
   }
   if (row.kind === "share") {
     return (
       <Box {...boxHighlight(theme.selection, selected)}>
         <Box flexShrink={1}>
           <Text wrap="truncate-end">
-            <CloudSlot cloud={row.counts.cloud > 0} theme={theme} selected={selected} />
-            <Text {...theme.paint("muted", selected)}>{row.expanded ? "▼ " : "▶ "}</Text>
+            <Text {...theme.paint("muted", selected)}>{row.expanded ? "  ▼ " : "  ▶ "}</Text>
+            <LocationSlot location={shareLocation(row.counts)} theme={theme} selected={selected} />
             <Text {...theme.paint("strong", selected)} bold {...textHighlight(theme.selection, selected)}>「{row.share.title ?? row.share.id}」</Text>
             <CountsText counts={row.counts} theme={theme} scanning={row.share.scanStatus !== "complete"} cancelled={row.share.cancelled} paused={row.share.paused} selected={selected} frame={frame} />
           </Text>
@@ -88,9 +91,9 @@ export function RowLine({ row, selected, snapshot, theme, columns, frame = null 
   const nameWidth = nameWidthFor(columns);
   return (
     <Box {...boxHighlight(theme.selection, selected)}>
-      <CloudSlot cloud={row.location.cloud} theme={theme} selected={selected} />
-      <Text {...theme.paint("key", selected)} bold>{selected ? "> " : "  "}</Text>
+      <Text {...theme.paint("key", selected)} bold>{selected ? "    > " : "      "}</Text>
       <Box width={3}><Text {...theme.paint(row.look.tone, selected)}>{row.look.active && frame !== null ? SPINNER[frame] : row.look.icon}</Text></Box>
+      <LocationSlot location={row.location} theme={theme} selected={selected} />
       <Box width={nameWidth} marginRight={1}><Text {...theme.paint("text", selected)} bold={selected} {...textHighlight(theme.selection, selected)}>{truncateMiddle(row.name, nameWidth)}</Text></Box>
       <Box width={8} marginRight={1}><Text {...theme.paint("muted", selected)}>{formatBytes(row.file.size)}</Text></Box>
       <Box flexShrink={1} flexGrow={1}><FileStatus row={row} snapshot={snapshot} theme={theme} selected={selected} /></Box>
