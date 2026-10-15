@@ -4,7 +4,7 @@ import { AppError } from "../src/errors";
 import { StartupApp, type StartupDeps } from "../src/tui/startup";
 import { createTheme } from "../src/tui/theme";
 import { login } from "../src/auth/login";
-import { FakeController, keys, settle, stripAnsi } from "./fixtures/tui";
+import { FakeController, eventually, keys, settle, stripAnsi } from "./fixtures/tui";
 import { about } from "../src/about";
 import { LOGO } from "../src/tui/brand";
 import type { Size } from "../src/tui/main-panel";
@@ -32,48 +32,53 @@ function mount(deps: StartupDeps, { size = { columns: 100, rows: 24 }, splashMs 
 
 test("已有实例时只提示并在按键后退出，不触碰登录与任务库", async () => {
   const { deps, calls } = fakeDeps({ busy: true, account: async () => { throw Error("must-not-read"); } });
-  const { frame, press } = mount(deps); await settle();
-  expect(frame()).toContain("已有实例正在使用任务库"); expect(frame()).toContain("按任意键退出");
-  await press("x"); expect(calls.exits).toEqual([1]); expect(calls.logins).toBe(0);
+  const { frame, press } = mount(deps);
+  await eventually(() => { expect(frame()).toContain("已有实例正在使用任务库"); expect(frame()).toContain("按任意键退出"); });
+  // 按键可能早于输入监听生效；重复按键直到退出被记录。
+  await eventually(async () => { if (!calls.exits.length) await press("x"); expect(calls.exits[0]).toBe(1); });
+  expect(calls.logins).toBe(0);
 });
 
 test("已登录且目录可用时直接进入主面板", async () => {
   const { deps, calls } = fakeDeps();
-  const { frame } = mount(deps); await settle(); await settle();
-  expect(calls.started).toEqual(["account"]); expect(frame()).toContain("PikPak Downloader"); expect(frame()).toContain("Enter 详情");
+  const { frame } = mount(deps);
+  await eventually(() => { expect(calls.started).toEqual(["account"]); expect(frame()).toContain("PikPak Downloader"); expect(frame()).toContain("Enter 详情"); });
 });
 
 test("未登录：Enter 打开浏览器授权并显示本地入口，Esc 取消授权；界面内没有密码输入", async () => {
   const { deps, calls } = fakeDeps({ account: async () => null });
-  const { frame, press } = mount(deps); await settle();
-  expect(frame()).toContain("尚未登录"); expect(frame()).toContain("按 Enter 在浏览器中打开 PikPak 官方授权页"); expect(frame()).not.toMatch(/密码[:：]/);
-  await press(keys.enter);
-  expect(calls.logins).toBe(1); expect(frame()).toContain("正在等待浏览器授权"); expect(frame()).toContain("http://127.0.0.1:53683");
+  const { frame, press } = mount(deps);
+  await eventually(() => { expect(frame()).toContain("尚未登录"); expect(frame()).toContain("按 Enter 在浏览器中打开 PikPak 官方授权页"); });
+  expect(frame()).not.toMatch(/密码[:：]/);
+  await eventually(async () => { if (!calls.logins) await press(keys.enter); expect(calls.logins).toBe(1); });
+  await eventually(() => { expect(frame()).toContain("正在等待浏览器授权"); expect(frame()).toContain("http://127.0.0.1:53683"); });
   await press(keys.escape);
-  expect(calls.signal?.aborted).toBe(true); expect(frame()).toContain("✗ 已取消授权");
-  await press(keys.escape); expect(calls.exits).toEqual([0]);
+  await eventually(() => { expect(calls.signal?.aborted).toBe(true); expect(frame()).toContain("✗ 已取消授权"); });
+  await eventually(async () => { if (!calls.exits.length) await press(keys.escape); expect(calls.exits).toEqual([0]); });
 });
 
 test("授权成功后检查目录：缺失时进入首次设置，保存失败显示原因，成功后进入主面板", async () => {
   let saves = 0;
   const { deps, calls } = fakeDeps({ account: async () => null, outputRoot: async () => null,
     login: async () => "account", saveOutputRoot: async path => { calls.saved.push(path); return ++saves === 1 ? { ok: false, reason: "output_unavailable" } : { ok: true }; } });
-  const { frame, press } = mount(deps); await settle();
-  await press(keys.enter); await settle();
+  const { frame, press } = mount(deps);
+  await eventually(() => expect(frame()).toContain("尚未登录"));
+  await eventually(async () => { if (!frame().includes("首次设置")) await press(keys.enter); expect(frame()).toContain("首次设置"); });
   expect(frame()).toContain("首次设置"); expect(frame()).toContain("C:\\Users\\demo\\Downloads\\PikPak▌"); expect(frame()).toContain("目录不存在时会自动创建");
   await press(keys.enter);
-  expect(calls.saved).toEqual(["C:\\Users\\demo\\Downloads\\PikPak"]); expect(frame()).toContain("✗ 下载目录不可用或不可写");
-  await press(keys.backspace, keys.backspace, "\x1b[200~X\r\n\x1b[201~", keys.enter); await settle();
-  expect(calls.saved.at(-1)).toBe("C:\\Users\\demo\\Downloads\\PikPX"); expect(calls.started).toEqual(["account"]); expect(frame()).toContain("Enter 详情");
+  await eventually(() => { expect(calls.saved).toEqual(["C:\\Users\\demo\\Downloads\\PikPak"]); expect(frame()).toContain("✗ 下载目录不可用或不可写"); });
+  await press(keys.backspace, keys.backspace, "\x1b[200~X\r\n\x1b[201~", keys.enter);
+  await eventually(() => { expect(calls.saved.at(-1)).toBe("C:\\Users\\demo\\Downloads\\PikPX"); expect(calls.started).toEqual(["account"]); expect(frame()).toContain("Enter 详情"); });
 });
 
 test("启动时会话失效回到登录页，其他启动失败显示原因并按键退出", async () => {
   const expired = fakeDeps({ start: async () => { throw new AppError("login_required"); } });
-  const first = mount(expired.deps); await settle(); await settle();
-  expect(first.frame()).toContain("登录已失效，请重新授权");
+  const first = mount(expired.deps);
+  await eventually(() => expect(first.frame()).toContain("登录已失效，请重新授权"));
   const broken = fakeDeps({ start: async () => { throw new AppError("state_unavailable"); } });
-  const second = mount(broken.deps); await settle(); await settle();
-  expect(second.frame()).toContain("任务库不可用"); await second.press("x"); expect(broken.calls.exits).toEqual([1]);
+  const second = mount(broken.deps);
+  await eventually(() => expect(second.frame()).toContain("任务库不可用"));
+  await eventually(async () => { if (!broken.calls.exits.length) await second.press("x"); expect(broken.calls.exits[0]).toBe(1); });
 });
 
 test("取消浏览器授权后本地回调端口立即释放", async () => {

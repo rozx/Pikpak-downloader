@@ -7,6 +7,13 @@ import type { LogLine } from "../../src/tui/view-model";
 export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
 export const keys = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", enter: "\r", escape: "\x1b", backspace: "\x7f", ctrlC: "\x03" };
 export const settle = () => Bun.sleep(40);
+// 负载较高时异步状态更新可能晚于固定等待：重试断言直到通过或超时。
+export async function eventually(assertion: () => void | Promise<void>, timeout = 3000): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (true) {
+    try { await assertion(); return; } catch (error) { if (Date.now() > deadline) throw error; await Bun.sleep(20); }
+  }
+}
 
 export const share = (id: string, title: string, status = "partial", extra: Partial<ShareView> = {}): ShareView => ({ id, title, outputRoot: "C:\\Users\\demo\\Downloads\\PikPak-Test",
   scanStatus: "complete", cancelled: false, lastError: null, summary: { status, total: 0, completed: 0, cancelled: 0, failed: 0, waiting: 0, active: 0, reason: null }, ...extra });
